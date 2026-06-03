@@ -1,0 +1,6 @@
+{
+  "name": "Med Rep",
+  "description": "نظام CRM وSFA الذكي والمستقل تماماً بدون إنترنت لمندوبي الدعاية الطبية لإدارة فواتير عينات الأدوية (FIFO) والزيارات الميدانية مع تتبع المواقع وتوليد خطط السير بالذكاء الاصطناعي.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
