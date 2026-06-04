@@ -603,7 +603,11 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
   const visitsByDoc: { [doc: string]: number } = {};
   state.visits.forEach((v) => {
     if (v.doctorName) {
-      visitsByDoc[v.doctorName] = (visitsByDoc[v.doctorName] || 0) + 1;
+      const vTime = new Date(v.visitDate).getTime();
+      const diffDays = (now - vTime) / (1000 * 60 * 60 * 24);
+      if (diffDays <= 7 && diffDays >= 0) {
+        visitsByDoc[v.doctorName] = (visitsByDoc[v.doctorName] || 0) + 1;
+      }
     }
   });
   Object.entries(visitsByDoc).forEach(([docName, count]) => {

@@ -23,6 +23,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
   const [selectedSample, setSelectedSample] = useState('');
   const [selectedDoctor, setSelectedDoctor] = useState('');
   const [reportSearchQuery, setReportSearchQuery] = useState('');
+  const [doctorInputFocused, setDoctorInputFocused] = useState(false);
 
   // AI Analysis states
   const [aiAnalysisText, setAiAnalysisText] = useState<string | null>(null);
@@ -597,20 +598,45 @@ export default function ReportsView({ lang }: ReportsViewProps) {
               </select>
             </div>
           ) : reportType === 'doctor' ? (
-            <div className="space-y-1.5 md:col-span-2">
+            <div className="space-y-1.5 md:col-span-2 relative">
               <label className="text-xs font-bold text-slate-600 block mb-1">{t.doctorLabel}</label>
-              <select
+              <input
+                type="text"
+                placeholder={lang === 'ar' ? 'ابحث باسم الطبيب (اكتب 3 أحرف)...' : 'Search doctor (min 3 chars)...'}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-semibold text-slate-800 focus:border-indigo-400 focus:bg-white transition-colors min-h-[44px]"
                 value={selectedDoctor}
                 onChange={(e) => {
                   setSelectedDoctor(e.target.value);
                   setAiAnalysisText(null);
                 }}
-              >
-                {db.doctors.map((d) => (
-                  <option key={d.id} value={d.name}>{d.name}</option>
-                ))}
-              </select>
+                onFocus={() => setDoctorInputFocused(true)}
+                onBlur={() => setTimeout(() => setDoctorInputFocused(false), 200)}
+              />
+              
+              {doctorInputFocused && selectedDoctor.length >= 3 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-100 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto">
+                  {db.doctors
+                    .filter(d => d.name.toLowerCase().includes(selectedDoctor.toLowerCase()))
+                    .map(d => (
+                      <div
+                        key={d.id}
+                        className="px-4 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0 cursor-pointer text-sm font-semibold text-slate-800 transition-colors"
+                        onClick={() => {
+                          setSelectedDoctor(d.name);
+                          setAiAnalysisText(null);
+                        }}
+                      >
+                        {d.name} <span className="text-[10px] text-slate-400 block font-normal">{d.speciality} • {d.workplace}</span>
+                      </div>
+                    ))}
+                  
+                  {db.doctors.filter(d => d.name.toLowerCase().includes(selectedDoctor.toLowerCase())).length === 0 && (
+                    <div className="px-4 py-3 text-xs text-slate-500 text-center">
+                      {lang === 'ar' ? 'لا يوجد طبيب بهذا الاسم.' : 'No doctors found.'}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-1.5 md:col-span-2">
