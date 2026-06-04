@@ -22,13 +22,24 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
 
-    <!-- Native PWA Service Worker Registrar -->
+    <!-- Native PWA Service Worker Unregister and Cache Buster to bypass stale offline caches -->
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('SFA ServiceWorker active for offline CRM use:', reg.scope))
-            .catch(err => console.warn('ServiceWorker registration deferred:', err));
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+          for (let registration of registrations) {
+            registration.unregister().then(() => {
+              console.log('Unregistered active service worker successfully to bypass cache');
+            });
+          }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then(keys => {
+          keys.forEach(key => {
+            caches.delete(key).then(() => {
+              console.log('Cleared cache storage:', key);
+            });
+          });
         });
       }
     </script>

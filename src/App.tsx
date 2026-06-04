@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import DashboardView from './components/DashboardView';
 import InvoicesView from './components/InvoicesView';
 import VisitsView from './components/VisitsView';
+import VisitsLogView from './components/VisitsLogView';
 import CyclePlanView from './components/CyclePlanView';
 import ReportsView from './components/ReportsView';
 import AiToolsView from './components/AiToolsView';
@@ -30,7 +31,7 @@ import {
   Settings
 } from 'lucide-react';
 
-type SfaView = 'dashboard' | 'invoices' | 'visits' | 'cycleplan' | 'reports' | 'ai' | 'files' | 'settings';
+type SfaView = 'dashboard' | 'invoices' | 'visits' | 'visitslog' | 'cycleplan' | 'reports' | 'ai' | 'files' | 'settings';
 
 
 export default function App() {
@@ -68,7 +69,8 @@ export default function App() {
       // Nav links
       dashboard: 'لوحة التحكم',
       invoices: 'المستودع والدفعات',
-      visits: 'الزيارات والتوزيع',
+      visits: 'تسجيل زيارة جديدة',
+      visitslog: 'سجل الزيارات',
       cycleplan: 'خطة السير الأسبوعية',
       reports: 'محرك التقارير',
       aiTools: 'الذكاء الرياضي والجغرافي',
@@ -85,7 +87,8 @@ export default function App() {
       // Nav links
       dashboard: 'SFA Dashboard',
       invoices: 'Invoice Batches',
-      visits: 'Field Visit Logs',
+      visits: 'Log New Visit',
+      visitslog: 'Visits Log',
       cycleplan: 'Weekly Cycle Plan',
       reports: 'Reporting Engine',
       aiTools: 'AI Spatial & Routing',
@@ -138,10 +141,16 @@ export default function App() {
             onClick={() => setActiveView('invoices')}
           />
           <SidebarLink
-            icon={<NotebookTabs className="w-4 h-4" />}
+            icon={<Calendar className="w-4 h-4" />}
             label={t.visits}
             active={activeView === 'visits'}
             onClick={() => setActiveView('visits')}
+          />
+          <SidebarLink
+            icon={<NotebookTabs className="w-4 h-4" />}
+            label={t.visitslog}
+            active={activeView === 'visitslog'}
+            onClick={() => setActiveView('visitslog')}
           />
           <SidebarLink
             icon={<Building className="w-4 h-4" />}
@@ -239,11 +248,20 @@ export default function App() {
             }}
           />
           <MobileNavLink
-            icon={<NotebookTabs className="w-4 h-4" />}
+            icon={<Calendar className="w-4 h-4" />}
             label={t.visits}
             active={activeView === 'visits'}
             onClick={() => {
               setActiveView('visits');
+              setMobileMenuOpen(false);
+            }}
+          />
+          <MobileNavLink
+            icon={<NotebookTabs className="w-4 h-4" />}
+            label={t.visitslog}
+            active={activeView === 'visitslog'}
+            onClick={() => {
+              setActiveView('visitslog');
               setMobileMenuOpen(false);
             }}
           />
@@ -336,6 +354,7 @@ export default function App() {
           {activeView === 'dashboard' && <DashboardView lang={lang} />}
           {activeView === 'invoices' && <InvoicesView lang={lang} />}
           {activeView === 'visits' && <VisitsView lang={lang} />}
+          {activeView === 'visitslog' && <VisitsLogView lang={lang} />}
           {activeView === 'cycleplan' && <CyclePlanView lang={lang} />}
           {activeView === 'reports' && <ReportsView lang={lang} />}
           {activeView === 'ai' && <AiToolsView lang={lang} />}

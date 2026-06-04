@@ -76,7 +76,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
   const [errorModalMsg, setErrorModalMsg] = useState<string | null>(null);
 
   // New features multi-tab configuration
-  const [mainTab, setMainTab] = useState<'log' | 'report' | 'migration'>('log');
+  const [mainTab, setMainTab] = useState<'log' | 'migration'>('log');
 
   // Visits Spreadsheet Report Filters
   const [reportSearchDoctor, setReportSearchDoctor] = useState('');
@@ -687,8 +687,23 @@ export default function VisitsView({ lang }: VisitsViewProps) {
           const decoded = JSON.parse(content);
           if (Array.isArray(decoded)) {
             resolve(decoded);
-          } else if (decoded && typeof decoded === 'object' && Array.isArray(decoded.data)) {
-            resolve(decoded.data);
+          } else if (decoded && typeof decoded === 'object') {
+            if (Array.isArray(decoded.doctors)) {
+              resolve(decoded.doctors);
+            } else if (Array.isArray(decoded.visits)) {
+              resolve(decoded.visits);
+            } else if (Array.isArray(decoded.data)) {
+              resolve(decoded.data);
+            } else {
+              // Try to find any property that contains an array
+              const keys = Object.keys(decoded);
+              const arrayKey = keys.find(k => Array.isArray(decoded[k]));
+              if (arrayKey) {
+                resolve(decoded[arrayKey]);
+              } else {
+                reject(new Error(lang === 'ar' ? 'الملف لا يحتوي على مصفوفة صالحة للأطباء أو الزيارات' : 'The file does not contain a valid array of doctors or visits'));
+              }
+            }
           } else {
             reject(new Error(lang === 'ar' ? 'الملف لا يحتوي على مصفوفة JSON صالحة' : 'The file does not contain a valid JSON array'));
           }
@@ -732,8 +747,9 @@ export default function VisitsView({ lang }: VisitsViewProps) {
       
       // Verification: Make sure all visits in the files match the expected month (2026-01, 2026-02, 2026-03, 2026-04)
       const invalidVisits = data.filter(item => {
-        if (!item.visit_date) return true;
-        return !item.visit_date.startsWith(expectedMonthStr);
+        const d = item.visit_date || item.date;
+        if (!d) return true;
+        return !d.startsWith(expectedMonthStr);
       });
       
       if (invalidVisits.length > 0) {
@@ -975,7 +991,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
       </div>
 
       {/* High-Level Feature Switcher */}
-      <div className="flex flex-wrap bg-slate-100 p-1 rounded-xl max-w-2xl w-full border border-slate-200 gap-1">
+      <div className="flex flex-wrap bg-slate-100 p-1 rounded-xl max-w-xl w-full border border-slate-200 gap-1">
         <button
           type="button"
           className={`flex-1 min-w-[125px] text-center py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2 ${
@@ -985,16 +1001,6 @@ export default function VisitsView({ lang }: VisitsViewProps) {
         >
           <Calendar className="w-4 h-4" />
           {lang === 'ar' ? 'تسجيل زيارة جديدة' : 'Log New Visit'}
-        </button>
-        <button
-          type="button"
-          className={`flex-1 min-w-[125px] text-center py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2 ${
-            mainTab === 'report' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-          }`}
-          onClick={() => setMainTab('report')}
-        >
-          <Search className="w-4 h-4" />
-          {lang === 'ar' ? 'سجل الزيارات والـ FIFO' : 'Ledger & FIFO Editor'}
         </button>
         <button
           type="button"
@@ -1467,218 +1473,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
         </>
       )}
 
-      {/* 2. Interactive Spreadsheet Report & Live FIFO Editor State Panel */}
-      {mainTab === 'report' && (
-        <div className="bg-white rounded-2xl border border-slate-150 p-6 shadow-sm space-y-6">
-          <div className="border-b border-slate-100 pb-3 flex justify-between items-center flex-wrap gap-4">
-            <div>
-              <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                <Database className="w-5 h-5 text-purple-600" />
-                {lang === 'ar' ? 'سجل الزيارات التفاعلي ومعدل الـ FIFO' : 'Interactive Visits Spreadsheet & FIFO Ledger'}
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {lang === 'ar' 
-                  ? 'جدول الرقابة المركزي لمطابقة التوزيع الجغرافي وتعديل الميزان الدوائي فورياً.' 
-                  : 'Central audit ledger for tracking GPS pins compliance and adjusting medicine quantities.'}
-              </p>
-            </div>
-            {/* Clear filters shortcut */}
-            {(reportSearchDoctor || reportDateFrom || reportDateTo) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setReportSearchDoctor('');
-                  setReportDateFrom('');
-                  setReportDateTo('');
-                }}
-                className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 font-semibold cursor-pointer text-slate-700"
-              >
-                {lang === 'ar' ? 'إعادة تعيين الفلاتر 🔄' : 'Reset Filters 🔄'}
-              </button>
-            )}
-          </div>
 
-          {/* Interactive Leaflet Map for Real-World Field Tracking */}
-          <div className="space-y-2 border-b border-slate-100 pb-6">
-            <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-indigo-500" />
-              {lang === 'ar' ? 'خريطة التتبع الميداني والـ GPS التفاعلية' : 'Field GPS Tracker Map (Interactive)'}
-            </h4>
-            <LeafletMap workplaces={db.workplaces} visits={db.visits} lang={lang} />
-          </div>
-
-          {/* Interactive Filters Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-600">
-                {lang === 'ar' ? 'البحث باسم الطبيب أو العميل' : 'Search Physician / Customer'}
-              </label>
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  placeholder={lang === 'ar' ? 'مثال: الدكتور طارق...' : 'e.g. Dr. Tariq...'}
-                  className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-xs outline-none focus:border-purple-500 font-medium"
-                  value={reportSearchDoctor}
-                  onChange={(e) => setReportSearchDoctor(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-600">
-                {lang === 'ar' ? 'تاريخ البداية (من)' : 'Date From'}
-              </label>
-              <input
-                type="date"
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-purple-500 font-mono"
-                value={reportDateFrom}
-                onChange={(e) => setReportDateFrom(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-600">
-                {lang === 'ar' ? 'تاريخ النهاية (إلى)' : 'Date To'}
-              </label>
-              <input
-                type="date"
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-purple-500 font-mono"
-                value={reportDateTo}
-                onChange={(e) => setReportDateTo(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* Table Container */}
-          <div className="overflow-x-auto border border-slate-100 rounded-xl">
-            <table className="w-full text-right md:text-right border-collapse text-xs">
-              <thead>
-                <tr className="bg-slate-100/80 text-slate-700 border-b border-slate-150">
-                  <th className="p-3 font-semibold">{lang === 'ar' ? 'بيانات الزيارة والعميل' : 'Physician & Client profile'}</th>
-                  <th className="p-3 font-semibold">{lang === 'ar' ? 'التاريخ الميداني' : 'Field Date'}</th>
-                  <th className="p-3 font-semibold">{lang === 'ar' ? 'العينات والكميات (تعديل مباشر)' : 'Distributed Items (FIFO Edit)'}</th>
-                  <th className="p-3 font-semibold">{lang === 'ar' ? 'الموقع الجغرافي والـ GPS' : 'GPS Location Tracking'}</th>
-                  <th className="p-3 font-semibold text-center">{lang === 'ar' ? 'الإجراءات' : 'Actions'}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {db.visits
-                  .filter((v) => {
-                    if (reportSearchDoctor.trim()) {
-                      const q = reportSearchDoctor.toLowerCase().trim();
-                      const nameMatch = v.doctorName?.toLowerCase().includes(q) || v.workplaceName?.toLowerCase().includes(q);
-                      if (!nameMatch) return false;
-                    }
-                    if (reportDateFrom && new Date(v.visitDate) < new Date(reportDateFrom)) return false;
-                    if (reportDateTo && new Date(v.visitDate) > new Date(reportDateTo)) return false;
-                    return true;
-                  })
-                  .map((v) => {
-                    const wpInDb = db.workplaces.find(w => w.name.trim().toLowerCase() === v.workplaceName.trim().toLowerCase());
-                    const hasMissingCoords = !wpInDb || wpInDb.latitude === null || wpInDb.longitude === null;
-
-                    return (
-                      <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="p-3">
-                          <div className="font-bold text-slate-900">
-                            {v.clientType === 'Doctor' ? v.doctorName : v.workplaceName}
-                          </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            {v.clientType === 'Doctor' ? `${v.workplaceName} • Class ${v.doctorClass || 'B'}` : (lang === 'ar' ? 'زيارة صيدلية خارجية' : 'Clinical Pharmacy Customer')}
-                          </div>
-                          {v.notes && (
-                            <div className="text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded-md mt-1 italic border-r-2 border-purple-400 max-w-sm truncate">
-                              "{v.notes}"
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="p-3 font-mono text-slate-600 font-semibold">{v.visitDate}</td>
-
-                        <td className="p-3 space-y-2">
-                          {v.samples.length > 0 ? (
-                            <div className="flex flex-col gap-1.5">
-                              {v.samples.map((s, idx) => (
-                                <div key={idx} className="flex items-center gap-2 bg-purple-50/50 border border-purple-100/40 p-1.5 rounded-lg justify-between max-w-xs">
-                                  <span className="font-medium text-slate-700 truncate max-w-[120px]">{s.sampleName}</span>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded font-mono text-[10px]">
-                                      {s.quantityDistributed} {lang === 'ar' ? 'وحدات' : 'items'}
-                                    </span>
-                                    {/* Edit Full Visit Details Button (Modal Popup) */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenFullEditModal(v)}
-                                      className="p-1 hover:bg-purple-200 hover:text-purple-900 rounded text-purple-600 transition-colors cursor-pointer"
-                                      title={lang === 'ar' ? 'تعديل جميع بيانات الزيارة' : 'Edit all visit data'}
-                                    >
-                                      <Edit3 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-slate-400 italic text-[11px]">{lang === 'ar' ? 'بدون صرف عينات' : 'Zero distribution'}</span>
-                          )}
-                        </td>
-
-                        <td className="p-3">
-                          {hasMissingCoords ? (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 max-w-xs space-y-1 text-[10px] text-amber-800 font-medium text-right">
-                              <div>⚠️ {lang === 'ar' ? 'الطبيب بدون موقع مؤرشف حالياً!' : 'Doctor has no saved location!'}</div>
-                              <button
-                                type="button"
-                                onClick={() => handleFixWorkplaceLocationInput(v.workplaceName)}
-                                className="text-purple-700 hover:text-purple-900 font-bold underline flex items-center gap-0.5 cursor-pointer text-[10px]"
-                              >
-                                📍 {lang === 'ar' ? 'تثبيت الموقع الحالي وحل الفجوة' : 'Fix & Pin Current Location'}
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="font-mono text-slate-500 text-[10px] flex flex-col gap-0.5">
-                              <span className="text-slate-700 font-medium font-sans">🌐 {v.workplaceName}</span>
-                              <span>Lat: {wpInDb?.latitude?.toFixed(5) || '---'}</span>
-                              <span>Lng: {wpInDb?.longitude?.toFixed(5) || '---'}</span>
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteVisit(v.id)}
-                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors cursor-pointer inline-flex"
-                            title={t.deleteBtn}
-                          >
-                            <Trash className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-
-                {db.visits.filter((v) => {
-                  if (reportSearchDoctor.trim()) {
-                    const q = reportSearchDoctor.toLowerCase().trim();
-                    return v.doctorName?.toLowerCase().includes(q) || v.workplaceName?.toLowerCase().includes(q);
-                  }
-                  if (reportDateFrom && new Date(v.visitDate) < new Date(reportDateFrom)) return false;
-                  if (reportDateTo && new Date(v.visitDate) > new Date(reportDateTo)) return false;
-                  return true;
-                }).length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="py-12 text-center text-slate-400 font-medium bg-slate-50/50">
-                      {lang === 'ar' ? 'لا توجد أي سجلات مطابقة للبحث حالياً.' : 'No matching visit logs found.'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* 3. Legacy File Data Migrator State Panel */}
       {mainTab === 'migration' && (() => {
