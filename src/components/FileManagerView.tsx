@@ -138,6 +138,40 @@ export default function FileManagerView({ lang }: FileManagerViewProps) {
     document.body.removeChild(link);
   };
 
+  // Simulate import a backup JSON file from the user's hard drive
+  const handleImportBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const fileContent = reader.result as string;
+          // Just parse to see if it's a valid JSON before saving it as a backup document
+          const parsed = JSON.parse(fileContent);
+          if (parsed.invoices && parsed.visits && parsed.doctors) {
+            saveVirtualFile({
+              name: file.name,
+              size: `${(fileContent.length / 1024).toFixed(2)} KB`,
+              dateModified: new Date().toISOString().replace('T', ' ').substring(0, 16),
+              folder: 'BACKUP',
+              content: fileContent,
+              type: 'backup',
+            });
+            reloadRegistry();
+            alert(lang === 'ar' ? 'تم استيراد ملف النسخة الاحتياطية بنجاح. يمكنك الآن الضغط على استعادة.' : 'Backup file imported successfully. You can now restore it.');
+          } else {
+            alert(lang === 'ar' ? 'نمط الملف غير صحيح، تأكد انه ملف نسخة Med Rep' : 'Invalid file format, ensure it is a Med Rep backup');
+          }
+        } catch (err) {
+            alert(lang === 'ar' ? 'حدث خطأ أثناء قراءة الملف.' : 'Error reading file.');
+        }
+      };
+      reader.readAsText(file);
+      // reset file input
+      e.target.value = '';
+    }
+  };
+
   // Filter doc lists
   const filteredDocs = db.files.filter((f) => {
     const matchesFolder = f.folder === activeFolder;
@@ -300,10 +334,16 @@ export default function FileManagerView({ lang }: FileManagerViewProps) {
         )}
 
         {/* Drag and drop manual selector block indicator */}
-        <div className="mt-4 border border-dashed border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col items-center justify-center text-center space-y-1">
-          <Upload className="w-4 h-4 text-slate-400" />
-          <span className="text-[10px] text-slate-400 font-medium">{t.dragDropLabel}</span>
-        </div>
+        <label className="mt-4 border-2 border-dashed border-indigo-200 hover:border-indigo-400 rounded-xl p-6 bg-slate-50/50 hover:bg-slate-50 flex flex-col items-center justify-center text-center space-y-2 cursor-pointer transition-colors block">
+          <Upload className="w-5 h-5 text-indigo-500" />
+          <span className="text-xs text-slate-600 font-bold">{t.dragDropLabel}</span>
+          <input
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleImportBackupFile}
+          />
+        </label>
       </div>
 
       {/* Database state JSON overwrite confirmation popup */}
