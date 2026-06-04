@@ -722,6 +722,7 @@ export function updateFullVisitLog(
   visitId: string,
   updatedData: {
     workplaceName?: string;
+    workplace2Name?: string;
     doctorClass?: 'A' | 'B' | 'C';
     samples: { sampleName: string; quantityDistributed: number }[];
     notes?: string;
@@ -781,6 +782,7 @@ export function updateFullVisitLog(
 
   if (updatedData.workplaceName) {
     const wpTrimmed = updatedData.workplaceName.trim();
+    // Update the edited visit's workplace
     finalVisit.workplaceName = wpTrimmed;
 
     let matchedWp = finalState.workplaces.find(
@@ -799,14 +801,62 @@ export function updateFullVisitLog(
     finalVisit.workplaceLongitude = matchedWp.longitude ?? undefined;
   }
 
-  if (updatedData.doctorClass && finalVisit.doctorName) {
-    finalVisit.doctorClass = updatedData.doctorClass;
+  // Handle secondary workplace insertion
+  let wp2Trimmed = '';
+  if (updatedData.workplace2Name) {
+    wp2Trimmed = updatedData.workplace2Name.trim();
+    if (wp2Trimmed) {
+      let matchedWp2 = finalState.workplaces.find(
+        (w) => w.name.trim().toLowerCase() === wp2Trimmed.toLowerCase()
+      );
+      if (!matchedWp2) {
+        matchedWp2 = {
+          id: `work-mig-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          name: wp2Trimmed,
+          latitude: null,
+          longitude: null,
+        };
+        finalState.workplaces.push(matchedWp2);
+      }
+    }
+  }
+
+  if (finalVisit.doctorName) {
     const docName = finalVisit.doctorName.trim();
     const docIndex = finalState.doctors.findIndex(
       (d) => d.name.trim().toLowerCase() === docName.toLowerCase()
     );
+    
+    // Update Doctor record
     if (docIndex !== -1) {
-      finalState.doctors[docIndex].classRating = updatedData.doctorClass;
+      if (updatedData.doctorClass) {
+        finalState.doctors[docIndex].classRating = updatedData.doctorClass;
+      }
+      if (updatedData.workplaceName) {
+        finalState.doctors[docIndex].workplace1 = updatedData.workplaceName.trim();
+      }
+      if (updatedData.workplace2Name) {
+        finalState.doctors[docIndex].workplace2 = wp2Trimmed;
+      }
+    }
+
+    // Cascade changes to all historical visits for this doctor
+    const combinedWorkplaceName = [updatedData.workplaceName?.trim(), wp2Trimmed].filter(Boolean).join(' و ');
+
+    finalState.visits.forEach((v) => {
+      // "Historical" visit check: notes include phrase from the old system
+      if (v.doctorName === docName && v.notes?.includes('النظام القديم')) {
+        if (updatedData.doctorClass) {
+          v.doctorClass = updatedData.doctorClass;
+        }
+        if (combinedWorkplaceName) {
+          v.workplaceName = combinedWorkplaceName;
+        }
+      }
+    });
+
+    if (updatedData.doctorClass) {
+      finalVisit.doctorClass = updatedData.doctorClass;
     }
   }
 

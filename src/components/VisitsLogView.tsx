@@ -43,6 +43,8 @@ export default function VisitsLogView({ lang }: VisitsLogViewProps) {
   const [isFullEditModalOpen, setIsFullEditModalOpen] = useState(false);
   const [fullEditVisitId, setFullEditVisitId] = useState<string | null>(null);
   const [fullEditWorkplace, setFullEditWorkplace] = useState('');
+  const [fullEditWorkplace2, setFullEditWorkplace2] = useState('');
+  const [showSecondWorkplaceInput, setShowSecondWorkplaceInput] = useState(false);
   const [fullEditDocClass, setFullEditDocClass] = useState<'A' | 'B' | 'C'>('C');
   const [fullEditNotes, setFullEditNotes] = useState('');
   const [fullEditSamples, setFullEditSamples] = useState<{ sampleName: string; quantityDistributed: number }[]>([]);
@@ -90,7 +92,13 @@ export default function VisitsLogView({ lang }: VisitsLogViewProps) {
   // Full visit transactional editor mechanics
   const handleOpenFullEditModal = (v: VisitLog) => {
     setFullEditVisitId(v.id);
-    setFullEditWorkplace(v.workplaceName || '');
+    
+    // Split combined workplace names if they exist (e.g. from previous edit)
+    const wpParts = (v.workplaceName || '').split(' و ');
+    setFullEditWorkplace(wpParts[0] || '');
+    setFullEditWorkplace2(wpParts[1] || '');
+    setShowSecondWorkplaceInput(!!wpParts[1]);
+
     setFullEditDocClass(v.doctorClass || 'C');
     setFullEditNotes(v.notes || '');
     setFullEditSamples(v.samples.map(s => ({
@@ -162,6 +170,7 @@ export default function VisitsLogView({ lang }: VisitsLogViewProps) {
       // Perform transaction
       updateFullVisitLog(fullEditVisitId, {
         workplaceName: fullEditWorkplace,
+        workplace2Name: showSecondWorkplaceInput ? fullEditWorkplace2 : undefined,
         doctorClass: fullEditDocClass,
         notes: fullEditNotes,
         samples: validated
@@ -481,9 +490,21 @@ export default function VisitsLogView({ lang }: VisitsLogViewProps) {
               
               {/* Workplace Name */}
               <div className="space-y-1 text-right relative">
-                <label className="text-xs font-bold text-slate-700">
-                  {lang === 'ar' ? 'مكان العمل (العيادة/المستشفى)' : 'Workplace Name'}
-                </label>
+                <div className="flex justify-between items-center mb-1">
+                  {!showSecondWorkplaceInput && (
+                    <button
+                      type="button"
+                      onClick={() => setShowSecondWorkplaceInput(true)}
+                      className="text-[10px] flex items-center justify-center gap-1 font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-full transition-colors"
+                    >
+                      <Plus className="w-3 h-3" />
+                      {lang === 'ar' ? 'إضافة مكان آخر' : 'Add Workplace'}
+                    </button>
+                  )}
+                  <label className="text-xs font-bold text-slate-700 ml-auto">
+                    {lang === 'ar' ? 'مكان العمل (العيادة/المستشفى)' : 'Workplace Name'}
+                  </label>
+                </div>
                 <input
                   type="text"
                   className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-xs outline-none text-right placeholder-slate-400 font-medium"
@@ -517,6 +538,35 @@ export default function VisitsLogView({ lang }: VisitsLogViewProps) {
                         {wp}
                       </button>
                     ))}
+                  </div>
+                )}
+                
+                {showSecondWorkplaceInput && (
+                  <div className="mt-3 relative">
+                    <div className="flex justify-between items-center mb-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSecondWorkplaceInput(false);
+                          setFullEditWorkplace2('');
+                        }}
+                        className="text-[10px] flex items-center justify-center gap-1 font-bold text-red-500 hover:text-red-700 transition-colors"
+                      >
+                        {lang === 'ar' ? 'إزالة' : 'Remove'}
+                      </button>
+                      <label className="text-[10px] font-bold text-slate-500 ml-auto">
+                        {lang === 'ar' ? 'مكان العمل الثاني (اختياري)' : 'Second Workplace (Optional)'}
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-xs outline-none text-right placeholder-slate-400 font-medium"
+                      value={fullEditWorkplace2}
+                      placeholder={lang === 'ar' ? 'ابحث أو ادخل اسم العيادة...' : 'Search or enter workplace...'}
+                      onChange={(e) => {
+                        setFullEditWorkplace2(e.target.value);
+                      }}
+                    />
                   </div>
                 )}
               </div>

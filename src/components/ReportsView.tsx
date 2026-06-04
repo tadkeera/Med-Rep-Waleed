@@ -15,7 +15,7 @@ interface ReportsViewProps {
 
 export default function ReportsView({ lang }: ReportsViewProps) {
   const [db, setDb] = useState(getInitialState());
-  const [reportType, setReportType] = useState<'sample' | 'doctor' | 'visitslog'>('sample');
+  const [reportType, setReportType] = useState<'sample' | 'doctor' | 'visitslog' | 'doctorsList'>('sample');
 
   // Input Filters
   const [dateFrom, setDateFrom] = useState('2026-05-01');
@@ -24,6 +24,9 @@ export default function ReportsView({ lang }: ReportsViewProps) {
   const [selectedDoctor, setSelectedDoctor] = useState('');
   const [reportSearchQuery, setReportSearchQuery] = useState('');
   const [doctorInputFocused, setDoctorInputFocused] = useState(false);
+  const [doctorListClassFilter, setDoctorListClassFilter] = useState('');
+  const [doctorListSpecFilter, setDoctorListSpecFilter] = useState('');
+  const [doctorListWorkplaceFilter, setDoctorListWorkplaceFilter] = useState('');
 
   // AI Analysis states
   const [aiAnalysisText, setAiAnalysisText] = useState<string | null>(null);
@@ -51,6 +54,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       title: 'محرك التقارير المتقدم الميداني',
       sampleType: 'تقرير تفريغ الصنف الطبي (Sample)',
       doctorType: 'تقرير تفصيلي شامل للطبيب (Doctor)',
+      doctorsListType: 'قائمة الأطباء',
       dateFromLabel: 'من تاريخ الزيارات',
       dateToLabel: 'إلى تاريخ',
       sampleLabel: 'اختر الصنف المراد تفريغه',
@@ -82,6 +86,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       title: 'Advanced Diagnostic Reports',
       sampleType: 'Sample Release Distribution Report',
       doctorType: 'Detailed Analytics Physician Report',
+      doctorsListType: 'Doctors List Report',
       dateFromLabel: 'Visits From Date',
       dateToLabel: 'To Date',
       sampleLabel: 'Choose Sample Medicine',
@@ -430,7 +435,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
           pdf.text(`${sInfo?.quantityDistributed || 0} Units`, 170, rowY);
           rowY += 9;
         });
-      } else {
+      } else if (reportType === 'doctor') {
         pdf.text(`Physician Record Subject: ${selectedDoctor}`, 15, 42);
         
         pdf.setFontSize(9);
@@ -447,7 +452,6 @@ export default function ReportsView({ lang }: ReportsViewProps) {
         doctorVisits.forEach((v) => {
           if (rowY > 270) {
             pdf.addPage();
-            // redraw page styling border on next page
             pdf.setDrawColor(200, 220, 255);
             pdf.setFillColor(255, 255, 255);
             pdf.roundedRect(6, 6, 198, 285, 3, 3, 'FD');
@@ -458,6 +462,45 @@ export default function ReportsView({ lang }: ReportsViewProps) {
           pdf.text(String(v.notes || 'No notes').substring(0, 48), 110, rowY);
           rowY += 9;
         });
+      } else if (reportType === 'doctorsList' as any) {
+        pdf.text(`Targeted Doctors Master List`, 15, 42);
+        
+        pdf.setFontSize(9);
+        pdf.setTextColor(15, 23, 42);
+        pdf.text('Name', 15, 52);
+        pdf.text('Spec.', 70, 52);
+        pdf.text('Class', 100, 52);
+        pdf.text('Workplace 1', 120, 52);
+        pdf.text('Workplace 2', 160, 52);
+        pdf.line(15, 55, 195, 55);
+
+        let rowY = 62;
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(71, 85, 105);
+
+        db.doctors
+          .filter((d) => !doctorListClassFilter || d.classRating === doctorListClassFilter)
+          .filter((d) => !doctorListSpecFilter || d.speciality?.toLowerCase().includes(doctorListSpecFilter.toLowerCase()))
+          .filter((d) => {
+            if (!doctorListWorkplaceFilter) return true;
+            const q = doctorListWorkplaceFilter.toLowerCase();
+            return (d.workplace1?.toLowerCase().includes(q) || d.workplace2?.toLowerCase().includes(q));
+          })
+          .forEach((d) => {
+            if (rowY > 270) {
+              pdf.addPage();
+              pdf.setDrawColor(200, 220, 255);
+              pdf.setFillColor(255, 255, 255);
+              pdf.roundedRect(6, 6, 198, 285, 3, 3, 'FD');
+              rowY = 20;
+            }
+            pdf.text(String(d.name).substring(0, 25), 15, rowY);
+            pdf.text(String(d.speciality).substring(0, 15), 70, rowY);
+            pdf.text(String(d.classRating || 'C'), 100, rowY);
+            pdf.text(String(d.workplace1 || 'N/A').substring(0, 20), 120, rowY);
+            pdf.text(String(d.workplace2 || '------').substring(0, 20), 160, rowY);
+            rowY += 9;
+          });
       }
 
       pdf.save(`${docTitle}.pdf`);
@@ -519,7 +562,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       <div className="flex bg-slate-100 p-1 rounded-xl w-full border border-slate-200">
         <button
           type="button"
-          className={`flex-1 text-center py-3 text-sm font-bold rounded-lg transition-all cursor-pointer ${
+          className={`flex-1 text-center py-3 text-xs md:text-sm font-bold rounded-lg transition-all cursor-pointer ${
             reportType === 'sample' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
           }`}
           onClick={() => {
@@ -531,7 +574,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
         </button>
         <button
           type="button"
-          className={`flex-1 text-center py-3 text-sm font-bold rounded-lg transition-all cursor-pointer ${
+          className={`flex-1 text-center py-3 text-xs md:text-sm font-bold rounded-lg transition-all cursor-pointer ${
             reportType === 'doctor' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
           }`}
           onClick={() => {
@@ -543,7 +586,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
         </button>
         <button
           type="button"
-          className={`flex-1 text-center py-3 text-sm font-bold rounded-lg transition-all cursor-pointer ${
+          className={`flex-1 text-center py-3 text-xs md:text-sm font-bold rounded-lg transition-all cursor-pointer ${
             reportType === 'visitslog' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
           }`}
           onClick={() => {
@@ -552,6 +595,18 @@ export default function ReportsView({ lang }: ReportsViewProps) {
           }}
         >
           {lang === 'ar' ? 'سجل الزيارات الموثق' : 'Audited Visits Ledger'}
+        </button>
+        <button
+          type="button"
+          className={`flex-1 text-center py-3 text-xs md:text-sm font-bold rounded-lg transition-all cursor-pointer ${
+            reportType === 'doctorsList' as any ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+          }`}
+          onClick={() => {
+            setReportType('doctorsList' as any);
+            setAiAnalysisText(null);
+          }}
+        >
+          {t.doctorsListType}
         </button>
       </div>
 
@@ -638,6 +693,48 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                 </div>
               )}
             </div>
+          ) : reportType === 'doctorsList' ? (
+            <>
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
+                  {lang === 'ar' ? 'تصنيف الطبيب (Class)' : 'Doctor Class'}
+                </label>
+                <select
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-semibold text-slate-800 focus:border-indigo-400 focus:bg-white transition-colors"
+                  value={doctorListClassFilter}
+                  onChange={(e) => setDoctorListClassFilter(e.target.value)}
+                >
+                  <option value="">{lang === 'ar' ? 'الكل' : 'All Classes'}</option>
+                  <option value="A">Class A</option>
+                  <option value="B">Class B</option>
+                  <option value="C">Class C</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
+                  {lang === 'ar' ? 'التخصص' : 'Specialization'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={lang === 'ar' ? 'تصفية بالتخصص...' : 'Filter by specialty...'}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-medium text-slate-800 focus:border-indigo-400 focus:bg-white transition-colors"
+                  value={doctorListSpecFilter}
+                  onChange={(e) => setDoctorListSpecFilter(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600 block mb-1">
+                  {lang === 'ar' ? 'مكان العمل' : 'Workplace'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={lang === 'ar' ? 'ابحث عن مكان العمل...' : 'Search workplace...'}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-medium text-slate-800 focus:border-indigo-400 focus:bg-white transition-colors"
+                  value={doctorListWorkplaceFilter}
+                  onChange={(e) => setDoctorListWorkplaceFilter(e.target.value)}
+                />
+              </div>
+            </>
           ) : (
             <div className="space-y-1.5 md:col-span-2">
               <label className="text-xs font-bold text-slate-600 block mb-1">
@@ -857,7 +954,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
               </div>
             </div>
           </motion.div>
-        ) : (
+        ) : reportType === 'visitslog' ? (
           <motion.div
             key="visitslog-report"
             initial={{ opacity: 0, y: 5 }}
@@ -939,7 +1036,73 @@ export default function ReportsView({ lang }: ReportsViewProps) {
               </table>
             </div>
           </motion.div>
-        )}
+        ) : reportType === 'doctorsList' ? (
+          <motion.div 
+            key="doctorslist-report"
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm p-6 space-y-4"
+          >
+            <div className="flex justify-between items-center bg-slate-50 border border-slate-100 p-4 rounded-xl">
+              <div>
+                <h4 className="text-sm font-bold text-slate-800">
+                  {lang === 'ar' ? 'قائمة الأطباء المستهدفين' : 'Targeted Doctors List'}
+                </h4>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50">
+              <table className="w-full text-right border-collapse text-[11px] leading-tight">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold">
+                    <th className="p-3">#</th>
+                    <th className="p-3 text-right">{lang === 'ar' ? 'اسم الطبيب' : 'Doctor Name'}</th>
+                    <th className="p-3 text-center">{lang === 'ar' ? 'التخصص' : 'Specialization'}</th>
+                    <th className="p-3 text-center">Class</th>
+                    <th className="p-3 text-right">{lang === 'ar' ? 'مكان العمل الأول' : 'Workplace 1'}</th>
+                    <th className="p-3 text-right">{lang === 'ar' ? 'مكان العمل الثاني' : 'Workplace 2'}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {db.doctors
+                    .filter((d) => !doctorListClassFilter || d.classRating === doctorListClassFilter)
+                    .filter((d) => !doctorListSpecFilter || d.speciality?.toLowerCase().includes(doctorListSpecFilter.toLowerCase()))
+                    .filter((d) => {
+                      if (!doctorListWorkplaceFilter) return true;
+                      const q = doctorListWorkplaceFilter.toLowerCase();
+                      return (d.workplace1?.toLowerCase().includes(q) || d.workplace2?.toLowerCase().includes(q));
+                    })
+                    .map((d, index) => (
+                      <tr key={d.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 w-8 text-slate-400 font-mono text-center">{index + 1}</td>
+                        <td className="p-3 font-bold text-slate-900 text-xs">{d.name}</td>
+                        <td className="p-3 text-center text-slate-600">{d.speciality}</td>
+                        <td className="p-3 text-center">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold font-mono ${
+                            d.classRating === 'A' ? 'bg-indigo-100 text-indigo-700' :
+                            d.classRating === 'B' ? 'bg-blue-100 text-blue-700' :
+                            'bg-slate-100 text-slate-700'
+                          }`}>
+                            {d.classRating || 'C'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-slate-700 font-medium">{d.workplace1 || 'غير محدد'}</td>
+                        <td className="p-3 text-slate-700 font-medium">{d.workplace2 || '------'}</td>
+                      </tr>
+                  ))}
+                  {db.doctors.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-slate-400">
+                        {lang === 'ar' ? 'لا توجد بيانات للأطباء' : 'No doctors found'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
+        ) : null}
       </AnimatePresence>
     </div>
   );

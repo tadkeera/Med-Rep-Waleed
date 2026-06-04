@@ -29,6 +29,8 @@ export interface Doctor {
   name: string;
   speciality: string;
   classRating: 'A' | 'B' | 'C';
+  workplace1?: string;
+  workplace2?: string;
 }
 
 export interface Workplace {
