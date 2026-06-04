@@ -21,10 +21,12 @@ import {
   recomputeAllFifoDeductions,
   standardizeSampleName,
   wipeAllMigratedVisitsAndRestoreStock,
-  wipeAllDataComplete
+  wipeAllDataComplete,
+  saveState
 } from '../utils/db';
 import { VisitLog, VisitSample, Doctor, Workplace } from '../types';
 import { Calendar, Users, MapPin, Package, AlertCircle, Plus, Trash, Check, Compass, Sparkles, Navigation, Edit3, Search, Database, Upload, ArrowLeftRight, Trash2, ArrowUpDown, Lock, Unlock, FileText, CheckCircle2, Loader2 } from 'lucide-react';
+import LeafletMap from './LeafletMap';
 
 interface VisitsViewProps {
   lang: 'ar' | 'en';
@@ -110,12 +112,30 @@ export default function VisitsView({ lang }: VisitsViewProps) {
   } | null>(null);
   const [isRecalculating, setIsRecalculating] = useState(false);
 
+  // Custom Reset & Wipe Confirmation states
+  const [showWipeModal, setShowWipeModal] = useState(false);
+  const [showWipeSuccess, setShowWipeSuccess] = useState(false);
+  const [wipeStats, setWipeStats] = useState<{ visitsCount: number; doctorsCount: number } | null>(null);
+
+  // Custom Delete Visit states
+  const [deletingVisitId, setDeletingVisitId] = useState<string | null>(null);
+
   // Legacy Migration Processor States
   const [legacyJsonInput, setLegacyJsonInput] = useState('');
   const [legacyHtmlInput, setLegacyHtmlInput] = useState('');
   const [migrationLogs, setMigrationLogs] = useState<string[]>([]);
   const [migrationErrors, setMigrationErrors] = useState<string[]>([]);
   const [migrationSuccessCount, setMigrationSuccessCount] = useState<number | null>(null);
+
+  // -----------------------------------------------------
+  // التخزين المؤقت لملفات الاستيراد المحمولة وتأكيدها (جديد)
+  // -----------------------------------------------------
+  const [showMigrationConfirm, setShowMigrationConfirm] = useState(false);
+  const [pendingType, setPendingType] = useState<'doctors' | 'jan' | 'feb' | 'mar' | 'apr' | null>(null);
+  const [pendingData, setPendingData] = useState<any[] | null>(null);
+  const [pendingFileName, setPendingFileName] = useState('');
+  const [pendingMonthName, setPendingMonthName] = useState('');
+  const [pendingExpectedMonthStr, setPendingExpectedMonthStr] = useState('');
 
   // File Picker Simulation Nodes and Filenames
   const doctorsFileRef = useRef<HTMLInputElement>(null);
@@ -451,11 +471,14 @@ export default function VisitsView({ lang }: VisitsViewProps) {
 
   // Perform cascade stock deletion
   const handleDeleteVisit = (id: string) => {
-    if (window.confirm(lang === 'ar' ? 'هل أنت متأكد من حذف هذه المتابعة وإرجاع رصيد المخزون؟' : 'Are you sure you want to verify rollback?')) {
-      deleteVisitLog(id);
-      reloadDb();
-      alert(t.rollbackSuccess);
-    }
+    setDeletingVisitId(id);
+  };
+
+  const executeDeleteVisit = () => {
+    if (!deletingVisitId) return;
+    deleteVisitLog(deletingVisitId);
+    reloadDb();
+    setDeletingVisitId(null);
   };
 
   // Dynamic FIFO Quantity Editor handler
@@ -586,15 +609,19 @@ export default function VisitsView({ lang }: VisitsViewProps) {
   };
 
   const handleWipeMigratedVisits = () => {
-    if (!window.confirm(lang === 'ar' 
-      ? 'تحذير: هل أنت متأكد من رغبتك في تصفير بيانات التطبيق كاملاً؟ سيتم حذف جميع الزيارات وقائمة الأطباء والخطط المجدولة بالكامل، وإرجاع كميات المخزون لمطابقة الفواتير المدخلة بنسبة 100% بدون أي خصومات.' 
-      : 'Warning: Are you sure you want to completely wipe all application data? This will delete all visits, doctors lists, and cycles, and restore warehouse stocks to match entered invoices 100% without any deductions.')) {
-      return;
-    }
+    setShowWipeModal(true);
+  };
+
+  const executeWipeAllData = () => {
     try {
       setIsRecalculating(true);
       const res = wipeAllDataComplete();
       
+      setWipeStats({
+        visitsCount: res.deletedVisitsCount,
+        doctorsCount: res.deletedDoctorsCount
+      });
+
       // Reset files states
       const resetMsg = lang === 'ar' ? 'لم يتم اختيار ملف' : 'No file chosen';
       setDoctorsFileName(resetMsg);
@@ -606,20 +633,16 @@ export default function VisitsView({ lang }: VisitsViewProps) {
       // Reset migration logs state
       setMigrationLogs([
         lang === 'ar' 
-          ? `🗑️ تم مسح ${res.deletedVisitsCount} زيارة وتصفير ${res.deletedDoctorsCount} طبياً بالكامل لمطابقة النظام الجديد.` 
+          ? `🗑️ تم مسح ${res.deletedVisitsCount} زيارة وتصفير ${res.deletedDoctorsCount} طبيباً بالكامل لمطابقة النظام الجديد.` 
           : `🗑️ Successfully wiped ${res.deletedVisitsCount} visits and cleared ${res.deletedDoctorsCount} doctors to match the new system.`
       ]);
       setMigrationErrors([]);
       setMigrationSuccessCount(null);
       setRecalcSummary(null);
 
-      alert(lang === 'ar' 
-        ? `✔ تم بنجاح تصفير التطبيق كاملاً! تم حذف الزيارات السابقة، ومسح قائمة الأطباء، وإرجاع كميات العينات لحالتها الأصلية بالفواتير الصرف بنسبة 100%. سيتم الآن إنعاش الصفحة بنجاح.` 
-        : `✔ Application successfully reset entirely! Wiped visits, cleared doctors, and restored actual stock to match entered invoices 100%. Refreshing page now.`
-      );
-      
-      // Full window reload to guarantee no stale states are cached anywhere in other tabs
-      window.location.reload();
+      reloadDb();
+      setShowWipeModal(false);
+      setShowWipeSuccess(true);
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
@@ -636,7 +659,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
       const pinLng = longitude || 46.6753;
       wp.latitude = pinLat;
       wp.longitude = pinLng;
-      localStorage.setItem('medrep_state', JSON.stringify(state));
+      saveState(state);
       reloadDb();
       alert(lang === 'ar' 
         ? `تم بنجاح تثبيت الإحداثيات لـ (${workplaceName}) على خطوط: ${pinLat.toFixed(4)}, ${pinLng.toFixed(4)}`
@@ -686,128 +709,17 @@ export default function VisitsView({ lang }: VisitsViewProps) {
     setIsProcessingState(true);
     try {
       const data = await processAndParseFileJson(file);
-      setDoctorsFileName(file.name);
-      
-      // Execute migration
-      migrateDoctorsFromLegacyJson(data);
-      
-      setMigrationLogs(prev => [
-        ...prev,
-        `${lang === 'ar' ? '✅ تم ترحيل ملف الأطباء بنجاح وبوضع المواقع الجغرافية كـ NULL:' : '✅ Successfully processed doctor file migration:'} ${file.name} (${data.length} records)`
-      ]);
-      setMigrationErrors([]);
-      setMigrationSuccessCount(data.length);
-      reloadDb();
-      alert(lang === 'ar' ? '✔ تم ترحيل الأطباء بنجاح وبوضع المواقع الجغرافية كـ NULL' : '✔ Successfully imported doctors directory with empty geographical indexes.');
+      setPendingType('doctors');
+      setPendingData(data);
+      setPendingFileName(file.name);
+      setPendingMonthName('');
+      setPendingExpectedMonthStr('');
+      setShowMigrationConfirm(true);
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
       setIsProcessingState(false);
       if (e.target) e.target.value = ''; // Reset file input
-    }
-  };
-
-  const handleImportFromMediafire = async () => {
-    setIsProcessingState(true);
-    setMigrationLogs(prev => [
-      ...prev,
-      `${lang === 'ar' ? '🕒 جاري الاتصال بخادم MediaFire لتحميل قائمة الأطباء (تتضمن 190 طبيب)...' : '🕒 Connecting to MediaFire servers to download the doctor directory (includes 190 doctors)...'}`
-    ]);
-    try {
-      const response = await fetch('/api/import-mediafire-doctors');
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || (lang === 'ar' ? 'فشل استيراد الملف' : 'Failed to import file'));
-      }
-      
-      const data = result.doctors;
-      
-      // Execute migration
-      migrateDoctorsFromLegacyJson(data);
-      
-      setMigrationLogs(prev => [
-        ...prev,
-        `${lang === 'ar' ? `✅ تم تنزيل واستيراد الأطباء من MediaFire بنجاح:` : `✅ Successfully downloaded and imported doctors from MediaFire:`} doctors.json (${data.length} records)`
-      ]);
-      setMigrationErrors([]);
-      setMigrationSuccessCount(data.length);
-      setDoctorsFileName('doctors.json (MediaFire)');
-      reloadDb();
-      alert(lang === 'ar' 
-        ? `✔ تم تنزيل واستيراد ${data.length} طبيب من MediaFire بنجاح وتحديث النظام!` 
-        : `✔ Successfully downloaded and imported ${data.length} doctors from MediaFire and updated the system!`);
-    } catch (err: any) {
-      console.error(err);
-      setMigrationLogs(prev => [
-        ...prev,
-        `${lang === 'ar' ? `❌ فشل عملية تحميل الأطباء من رابط MediaFire: ` : `❌ MediaFire doctor list download failed: `} ${err.message}`
-      ]);
-      alert(lang === 'ar' 
-        ? `فشل تنزيل ملف أطباء MediaFire. يرجى مراجعة الاتصال أو المحاولة مجدداً. الخطأ: ${err.message}` 
-        : `Failed to download Mediafire doctor file. Please check connection or try again. Error: ${err.message}`);
-    } finally {
-      setIsProcessingState(false);
-    }
-  };
-
-  const handleImportMonthFromMediafire = async (monthId: string, monthName: string, expectedMonthStr: string) => {
-    setIsProcessingState(true);
-    setMigrationLogs(prev => [
-      ...prev,
-      `${lang === 'ar' ? `🕒 جاري الاتصال بخادم MediaFire لتحميل سجل زيارات شهر ${monthName}...` : `🕒 Connecting to MediaFire servers to download visit logs for ${monthName}...`}`
-    ]);
-    try {
-      const response = await fetch(`/api/import-mediafire-month?month=${monthId}`);
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || (lang === 'ar' ? 'فشل استيراد الملف' : 'Failed to import file'));
-      }
-
-      const data = result.data;
-
-      // Execute migration using our newly upgraded migrateHistoricalVisitsAndDeductStock which handles both formats!
-      const status = migrateHistoricalVisitsAndDeductStock(data);
-
-      // Update file state Name
-      if (expectedMonthStr === '2026-01') setJanFileName(`${monthName} (MediaFire)`);
-      else if (expectedMonthStr === '2026-02') setFebFileName(`${monthName} (MediaFire)`);
-      else if (expectedMonthStr === '2026-04') setAprFileName(`${monthName} (MediaFire)`);
-      else if (expectedMonthStr === '2026-03') setMarFileName(`${monthName} (MediaFire)`);
-
-      setMigrationLogs(prev => [
-        ...prev,
-        `${lang === 'ar' 
-          ? `✔ تم تحميل ودمج زيارات شهر ${monthName} من MediaFire بنظام FIFO الرجعي:` 
-          : `✔ Mediafire retroactive FIFO sync successfully processed for ${monthName}:`} ${status.successCount} succeeded, ${status.errors.length} alarms`
-      ]);
-      setMigrationErrors(status.errors);
-      setMigrationSuccessCount(status.successCount);
-      reloadDb();
-      alert(lang === 'ar' 
-        ? `✔ تم تنزيل وخصم زيارات شهر ${monthName} بنجاح من MediaFire بنظام FIFO الرجعي والتراكمي!` 
-        : `✔ Successfully downloaded, legacy ledgered, and computed FIFO deductions for ${monthName} bucket directly from MediaFire!`
-      );
-    } catch (err: any) {
-      console.error(err);
-      setMigrationLogs(prev => [
-        ...prev,
-        `${lang === 'ar' ? `❌ فشل دمج زيارات شهر ${monthName}: ` : `❌ Failed to ingest ${monthName} visit logs: `} ${err.message}`
-      ]);
-      alert(lang === 'ar' 
-        ? `فشل دمج ملف شهر ${monthName}. الخطأ: ${err.message}` 
-        : `Failed to download or integrate month ${monthName}. Error: ${err.message}`);
-    } finally {
-      setIsProcessingState(false);
     }
   };
 
@@ -831,31 +743,67 @@ export default function VisitsView({ lang }: VisitsViewProps) {
         );
       }
 
-      // Execute migration
-      const result = migrateHistoricalVisitsAndDeductStock(data);
-      
-      // Update file state
-      if (expectedMonthStr === '2026-01') setJanFileName(file.name);
-      else if (expectedMonthStr === '2026-02') setFebFileName(file.name);
-      else if (expectedMonthStr === '2026-03') setMarFileName(file.name);
-      else if (expectedMonthStr === '2026-04') setAprFileName(file.name);
-
-      setMigrationLogs(prev => [
-        ...prev,
-        `${lang === 'ar' ? `✔ تم ترحيل زيارات شهر ${monthName} بنظام الـ FIFO الرجعي المجدول :` : `✔ Scheduled retroactive FIFO deduction completed for ${monthName}:`} ${file.name} (${result.successCount} succeeded, ${result.errors.length} alarms)`
-      ]);
-      setMigrationErrors(result.errors);
-      setMigrationSuccessCount(result.successCount);
-      reloadDb();
-      alert(lang === 'ar' 
-        ? `✔ تم استيراد وخصم زيارات صنف شهر ${monthName} بنظام الـ FIFO الرجعي المجدول!` 
-        : `✔ Successfully ledgered and computed FIFO deductions for ${monthName} bucket!`
-      );
+      setPendingType(expectedMonthStr === '2026-01' ? 'jan' : expectedMonthStr === '2026-02' ? 'feb' : expectedMonthStr === '2026-03' ? 'mar' : 'apr');
+      setPendingData(data);
+      setPendingFileName(file.name);
+      setPendingMonthName(monthName);
+      setPendingExpectedMonthStr(expectedMonthStr);
+      setShowMigrationConfirm(true);
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
       setIsProcessingState(false);
       if (e.target) e.target.value = ''; // Reset file input
+    }
+  };
+
+  // معالج استيراد الملف بعد موافقة المندوب في البوكس التنبيهي (جديد)
+  const executePendingMigration = () => {
+    if (!pendingType || !pendingData) return;
+
+    setIsProcessingState(true);
+    try {
+      if (pendingType === 'doctors') {
+        migrateDoctorsFromLegacyJson(pendingData);
+        setDoctorsFileName(pendingFileName);
+        setMigrationLogs(prev => [
+          ...prev,
+          `${lang === 'ar' ? '✅ تم ترحيل ملف الأطباء بنجاح وبوضع المواقع الجغرافية كـ NULL:' : '✅ Successfully processed doctor file migration:'} ${pendingFileName} (${pendingData.length} records)`
+        ]);
+        setMigrationErrors([]);
+        setMigrationSuccessCount(pendingData.length);
+        reloadDb();
+        alert(lang === 'ar' ? '✔ تم استيراد وترحيل قائمة الأطباء بنجاح!' : '✔ Successfully imported doctors directory!');
+      } else {
+        const result = migrateHistoricalVisitsAndDeductStock(pendingData);
+        
+        if (pendingExpectedMonthStr === '2026-01') setJanFileName(pendingFileName);
+        else if (pendingExpectedMonthStr === '2026-02') setFebFileName(pendingFileName);
+        else if (pendingExpectedMonthStr === '2026-03') setMarFileName(pendingFileName);
+        else if (pendingExpectedMonthStr === '2026-04') setAprFileName(pendingFileName);
+
+        setMigrationLogs(prev => [
+          ...prev,
+          `${lang === 'ar' ? `✔ تم ترحيل زيارات شهر ${pendingMonthName} بنظام الـ FIFO الرجعي المجدول :` : `✔ Scheduled retroactive FIFO deduction completed for ${pendingMonthName}:`} ${pendingFileName} (${result.successCount} succeeded, ${result.errors.length} alarms)`
+        ]);
+        setMigrationErrors(result.errors);
+        setMigrationSuccessCount(result.successCount);
+        reloadDb();
+        alert(lang === 'ar' 
+          ? `✔ تم استيراد وخصم زيارات صنف شهر ${pendingMonthName} بنظام الـ FIFO الرجعي المجدول!` 
+          : `✔ Successfully ledgered and computed FIFO deductions for ${pendingMonthName} bucket!`
+        );
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsProcessingState(false);
+      setShowMigrationConfirm(false);
+      setPendingType(null);
+      setPendingData(null);
+      setPendingFileName('');
+      setPendingMonthName('');
+      setPendingExpectedMonthStr('');
     }
   };
 
@@ -1550,6 +1498,15 @@ export default function VisitsView({ lang }: VisitsViewProps) {
             )}
           </div>
 
+          {/* Interactive Leaflet Map for Real-World Field Tracking */}
+          <div className="space-y-2 border-b border-slate-100 pb-6">
+            <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-indigo-500" />
+              {lang === 'ar' ? 'خريطة التتبع الميداني والـ GPS التفاعلية' : 'Field GPS Tracker Map (Interactive)'}
+            </h4>
+            <LeafletMap workplaces={db.workplaces} visits={db.visits} lang={lang} />
+          </div>
+
           {/* Interactive Filters Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
             <div className="space-y-1">
@@ -1807,33 +1764,19 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                     <div className="flex flex-col gap-2">
                       <button
                         type="button"
-                        onClick={() => doctorsFileRef.current?.click()}
-                        className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg cursor-pointer transition-colors border border-slate-200"
-                      >
-                        {lang === 'ar' ? 'اختر ملف الأطباء (JSON)' : 'Choose Doctors File (JSON)'}
-                      </button>
-                      
-                      <div className="flex items-center justify-center gap-2 text-slate-300 text-[10px] my-1 font-bold">
-                        <span>—</span>
-                        <span>{lang === 'ar' ? 'أو' : 'OR'}</span>
-                        <span>—</span>
-                      </div>
-
-                      <button
-                        type="button"
                         disabled={isProcessingState}
-                        onClick={handleImportFromMediafire}
+                        onClick={() => doctorsFileRef.current?.click()}
                         className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-indigo-500/10"
                       >
                         {isProcessingState ? (
                           <>
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            {lang === 'ar' ? 'جاري التحميل والتثبيت والدمج...' : 'Downloading & Ingesting...'}
+                            {lang === 'ar' ? 'جاري قراءة وتحميل الملف...' : 'Reading & Uploading...'}
                           </>
                         ) : (
                           <>
-                            <Database className="w-4 h-4 text-purple-200 animate-pulse" />
-                            {lang === 'ar' ? 'تحميل مباشر من رابط MediaFire (190 طبيب)' : 'Download & Import doctors from MediaFire (190)'}
+                            <Upload className="w-4 h-4 text-purple-200" />
+                            {lang === 'ar' ? 'استيراد قائمة الأطباء المحلية (JSON)' : 'Import Local Doctor List (JSON)'}
                           </>
                         )}
                       </button>
@@ -1935,34 +1878,21 @@ export default function VisitsView({ lang }: VisitsViewProps) {
 
                           {/* Action upload file-pickers details */}
                           <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
-                            {/* Direct Mediafire Import Button */}
-                            {m.isUnlocked && !m.isComplete && (
-                              <button
-                                type="button"
-                                disabled={isProcessingState}
-                                onClick={() => handleImportMonthFromMediafire(m.id, monthName, m.dateStr)}
-                                className="px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm shadow-indigo-500/10 shrink-0"
-                              >
-                                <Database className="w-3 h-3 text-purple-200" />
-                                {lang === 'ar' ? 'تحميل مباشر من MediaFire' : 'Direct Download'}
-                              </button>
-                            )}
-
                             {/* Open File dialog button */}
                             <button
                               type="button"
                               disabled={!m.isUnlocked}
                               onClick={() => m.ref.current?.click()}
-                              className={`px-2.5 py-1.5 rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                              className={`px-3 py-1.5 rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
                                 !m.isUnlocked 
                                   ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
+                                  : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm shadow-indigo-500/10'
                               }`}
                             >
-                              <Upload className="w-3 h-3" />
+                              <Upload className="w-3.5 h-3.5" />
                               {m.fileName !== (lang === 'ar' ? 'لم يتم اختيار ملف' : 'No file chosen') 
                                 ? m.fileName 
-                                : lang === 'ar' ? 'ملف يدوي' : 'Pick PDF/JSON'}
+                                : lang === 'ar' ? 'استيراد ملف JSON' : 'Import JSON file'}
                             </button>
 
                             {/* Simulation toggle buttons for instant testing */}
@@ -2187,6 +2117,158 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                   {lang === 'ar' ? 'حفظ وتعديل الـ FIFO' : 'Save & Adjust FIFO'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom FULL WIPE Confirmation Modal */}
+      {showWipeModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 border border-red-100 space-y-5 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3.5 text-red-600">
+              <div className="p-3 bg-red-50 rounded-xl">
+                <Trash2 className="w-7 h-7 text-red-600 font-bold" />
+              </div>
+              <div className="text-right">
+                <h4 className="font-extrabold text-slate-950 text-base">
+                  {lang === 'ar' ? 'تصفير بيانات التطبيق بالكامل؟' : 'Completely Reset Application Data?'}
+                </h4>
+                <p className="text-[10px] text-red-600 font-semibold mt-0.5">
+                  {lang === 'ar' ? 'هذا الإجراء خطير ولا يمكن التراجع عنه' : 'This action is dangerous and irreversible'}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3.5 text-right font-sans">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {lang === 'ar' 
+                  ? 'سيقوم هذا النظام بتنفيذ عملية مسح شاملة وتطهير للذاكرة لاسترجاع الوضع الأصلي للتطبيق وتعديل كافة الاختناقات الحسابية:'
+                  : 'This process will execute a comprehensive memory purge to restore the original application state and resolve calculation offsets:'}
+              </p>
+
+              <div className="bg-red-50/50 p-4 rounded-xl border border-red-100/50 space-y-2.5 text-xs text-slate-800">
+                <div className="flex items-start gap-2.5 justify-start">
+                  <span className="text-red-500 font-bold mt-0.5">●</span>
+                  <span>
+                    {lang === 'ar' 
+                      ? 'حذف كافة الزيارات والمتابعات المسجلة والمستوردة بشكل نهائي.' 
+                      : 'Permanently delete all registered and imported doctor visit logs.'}
+                  </span>
+                </div>
+                <div className="flex items-start gap-2.5 justify-start">
+                  <span className="text-red-500 font-bold mt-0.5">●</span>
+                  <span>
+                    {lang === 'ar' 
+                      ? 'مسح كامل لقائمة الأطباء والجهات وخطط الدورات المجدولة.' 
+                      : 'Completely clear the doctors list, workplaces, and planned cycle plans.'}
+                  </span>
+                </div>
+                <div className="flex items-start gap-2.5 justify-start">
+                  <span className="text-red-500 font-bold mt-0.5">●</span>
+                  <span>
+                    {lang === 'ar' 
+                      ? 'استعادة كميات العينات بالمستودع لتطابق الصادر الفعلي بالفواتير 100% دون أي خصومات.' 
+                      : 'Restore warehouse sample quantities to match original spent invoices 100% without any deductions.'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowWipeModal(false)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer text-center"
+              >
+                {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={executeWipeAllData}
+                className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-red-600/10 transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
+              >
+                {lang === 'ar' ? 'تأكيد تصفيف وتطهير الذاكرة' : 'Confirm Wipe & Reset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wipe/Reset Success Modal */}
+      {showWipeSuccess && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 border border-emerald-100 space-y-5 shadow-2xl relative animate-in fade-in duration-200">
+            <div className="flex flex-col items-center justify-center text-center space-y-3 pt-3">
+              <div className="p-3.5 bg-emerald-50 rounded-full text-emerald-600">
+                <CheckCircle2 className="w-12 h-12 text-emerald-600" />
+              </div>
+              <h4 className="font-extrabold text-slate-950 text-base">
+                {lang === 'ar' ? 'تم تصفير التطبيق بنجاح!' : 'Application Reset Successfully!'}
+              </h4>
+              <p className="text-xs text-slate-500 leading-relaxed max-w-xs">
+                {lang === 'ar' 
+                  ? 'تم بنجاح حذف الزيارات السابقة، ومسح قائمة الأطباء بالكامل، وتصفير العينات المخصومة لتطابق الفواتير بنسبة 100%.' 
+                  : 'Successfully deleted previous visits, cleared entire doctors list, and restored sample stocks back to match entered invoices 100%.'}
+              </p>
+            </div>
+
+            {wipeStats && (
+              <div className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-100/50 space-y-2 text-xs text-slate-700 font-mono text-center">
+                <div>{lang === 'ar' ? `🗑️ الزيارات المحذوفة: ${wipeStats.visitsCount}` : `🗑️ Deleted Visits: ${wipeStats.visitsCount}`}</div>
+                <div>{lang === 'ar' ? `🗑️ الأطباء المحذوفون: ${wipeStats.doctorsCount}` : `🗑️ Cleared Doctors: ${wipeStats.doctorsCount}`}</div>
+                <div className="text-[10px] text-emerald-700 font-bold mt-1.5">{lang === 'ar' ? '📦 تم استرجاع المخزون الفعلي بنسبة 100%' : '📦 100% actual stock ledger restored'}</div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowWipeSuccess(false);
+                window.location.reload();
+              }}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-lg shadow-emerald-600/10 text-center"
+            >
+              {lang === 'ar' ? 'إلى القائمة الرئيسية' : 'To Main Dashboard'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Delete Confirmation Modal */}
+      {deletingVisitId && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 border border-red-50 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="p-2 bg-red-50 rounded-lg">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h4 className="font-extrabold text-slate-950 text-sm">
+                {lang === 'ar' ? 'حذف الزيارة وإرجاع المخزون؟' : 'Delete Visit & Restore Stock?'}
+              </h4>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed text-right font-sans">
+              {lang === 'ar' 
+                ? 'هل أنت متأكد من رغبتك في حذف هذه المتابعة نهائياً؟ سيتم تلقائياً إرجاع الكميات المخصومة من العينات إلى المخزون الأصلي بنظام FIFO.' 
+                : 'Are you sure you want to permanently delete this visit log? Deducted sample quantities will be rolled back into the warehouse inventory using FIFO.'}
+            </p>
+
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeletingVisitId(null)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer text-center"
+              >
+                {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={executeDeleteVisit}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer text-center"
+              >
+                {lang === 'ar' ? 'تأكيد الحذف والرجوع' : 'Confirm Delete'}
+              </button>
             </div>
           </div>
         </div>
@@ -2563,6 +2645,66 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                 className="px-5.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer"
               >
                 {lang === 'ar' ? 'حفظ التغييرات ومزامنة FIFO' : 'Save & Sync FIFO'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* -----------------------------------------------------
+          بوكس تأكيد استيراد الملف التنبيهي المنبثق (جديد)
+          ----------------------------------------------------- */}
+      {showMigrationConfirm && pendingType && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-slate-100 overflow-hidden shadow-2xl p-6 space-y-4 text-right">
+            <div className="flex items-center gap-3 justify-end text-purple-600">
+              <h4 className="font-extrabold text-slate-950 text-base">
+                {lang === 'ar' ? 'تأكيد استيراد ملف البيانات 📤' : 'Confirm File Import 📤'}
+              </h4>
+              <div className="p-2 bg-purple-50 rounded-xl">
+                <Upload className="w-6 h-6 animate-pulse" />
+              </div>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-600 leading-relaxed font-semibold text-right" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+              <p>
+                {lang === 'ar' 
+                  ? `هل أنت متأكد من استيراد هذا الملف؟ ${pendingFileName}` 
+                  : `Are you sure you want to import this file? ${pendingFileName}`}
+              </p>
+              <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl font-mono text-slate-800 break-all text-center">
+                📁 {pendingFileName}
+              </div>
+              {pendingMonthName && (
+                <p className="text-amber-800 text-[10px] bg-amber-50 border border-amber-100 p-2 rounded-lg mt-1 text-right">
+                  ⚠️ {lang === 'ar' 
+                    ? `سيتم تطبيق خصم العينات التراكمية لشهر ${pendingMonthName} من فواتير الـ FIFO بالترتيب.` 
+                    : `This will apply cumulative sample deductions for ${pendingMonthName} from FIFO invoices sequentially.`}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMigrationConfirm(false);
+                  setPendingType(null);
+                  setPendingData(null);
+                  setPendingFileName('');
+                  setPendingMonthName('');
+                  setPendingExpectedMonthStr('');
+                }}
+                className="px-4 py-2 bg-slate-150 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer"
+              >
+                {lang === 'ar' ? 'تراجع وإلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={executePendingMigration}
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer"
+              >
+                {lang === 'ar' ? 'نعم، استورد البيانات' : 'Yes, Import Data'}
               </button>
             </div>
           </div>

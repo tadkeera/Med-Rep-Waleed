@@ -9,15 +9,6 @@ import { Invoice, InvoiceItem, Doctor, Workplace, VisitLog, WeeklyCycle, Virtual
 const DB_VERSION = '1.1';
 const STORAGE_PREFIX = 'medrep_db_';
 
-// Guaranteed One-time Purge on Load to make it 100% Fresh without entered data
-if (!localStorage.getItem('medrep_fresh_boot_v3')) {
-  localStorage.setItem('medrep_fresh_boot_v3', 'true');
-  localStorage.removeItem(`${STORAGE_PREFIX}state`);
-  localStorage.removeItem('medrep_representative_name');
-  localStorage.removeItem('medrep_representative_grade');
-  localStorage.removeItem('corporate_logo');
-}
-
 interface DatabaseState {
   version: string;
   invoices: Invoice[];
@@ -33,18 +24,44 @@ interface DatabaseState {
   };
 }
 
-// Seed Data (Cleared to start fresh and empty)
-const SEED_DOCTORS: Doctor[] = [];
+// =====================================================================================
+// INDEXEDDB PRE-BOOT SYNCHRONIZATION ENGINE
+// =====================================================================================
 
-const SEED_WORKPLACES: Workplace[] = [];
-
-const SEED_INVOICES: Invoice[] = [];
-
-const SEED_VISITS: VisitLog[] = [];
-
-const SEED_WEEKLY_PLAN: WeeklyCycle[] = [];
-
-const SEED_FILES: VirtualFile[] = [];
+/**
+ * Pre-boot initialization: Loads state from IndexedDB to memory/localStorage synchronously
+ * before React mounts the virtual DOM tree, preventing data caps and page flicker.
+ */
+export function initIndexedDB(): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open('MedRepSecureIDB_v2', 1);
+      request.onupgradeneeded = (e: any) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('state_store')) {
+          db.createObjectStore('state_store');
+        }
+      };
+      request.onsuccess = (e: any) => {
+        const db = e.target.result;
+        const tx = db.transaction('state_store', 'readonly');
+        const store = tx.objectStore('state_store');
+        const getReq = store.get('current_state');
+        getReq.onsuccess = () => {
+          if (getReq.result) {
+            localStorage.setItem(`${STORAGE_PREFIX}state`, JSON.stringify(getReq.result));
+          }
+          resolve();
+        };
+        getReq.onerror = () => resolve();
+      };
+      request.onerror = () => resolve();
+    } catch (err) {
+      console.warn('IndexedDB unavailable, falling back to local storage:', err);
+      resolve();
+    }
+  });
+}
 
 export function getInitialState(): DatabaseState {
   const stored = localStorage.getItem(`${STORAGE_PREFIX}state`);
@@ -62,12 +79,12 @@ export function getInitialState(): DatabaseState {
   // Set default empty initial state
   const state: DatabaseState = {
     version: DB_VERSION,
-    invoices: SEED_INVOICES,
-    doctors: SEED_DOCTORS,
-    workplaces: SEED_WORKPLACES,
-    visits: SEED_VISITS,
-    weeklyCycles: SEED_WEEKLY_PLAN,
-    files: SEED_FILES,
+    invoices: [],
+    doctors: [],
+    workplaces: [],
+    visits: [],
+    weeklyCycles: [],
+    files: [],
     settings: {
       serverUrl: 'https://ais-dev-si6uixl2yb6tgxnqbihxge-5901476095.europe-west1.run.app/api',
       apiKey: 'MY_GEMINI_API_KEY',
@@ -79,7 +96,21 @@ export function getInitialState(): DatabaseState {
 }
 
 export function saveState(state: DatabaseState) {
+  // 1. Sync immediately to localStorage for fast synchronous operations
   localStorage.setItem(`${STORAGE_PREFIX}state`, JSON.stringify(state));
+
+  // 2. Persist in IndexedDB asynchronously for permanent safety
+  try {
+    const request = indexedDB.open('MedRepSecureIDB_v2', 1);
+    request.onsuccess = (e: any) => {
+      const db = e.target.result;
+      const tx = db.transaction('state_store', 'readwrite');
+      const store = tx.objectStore('state_store');
+      store.put(state, 'current_state');
+    };
+  } catch (err) {
+    console.error('Failed to sync to IndexedDB', err);
+  }
 }
 
 // -----------------------------------------------------
@@ -96,12 +127,11 @@ export function addInvoice(invoice: Omit<Invoice, 'id'>): Invoice {
     id: `inv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
   };
 
-  // Assign IDs to invoice items
   newInvoice.items = newInvoice.items.map((item, idx) => ({
     ...item,
     id: `item-${Date.now()}-${idx}`,
     invoiceId: newInvoice.id,
-    currentQuantity: item.initialQuantity, // initialized
+    currentQuantity: item.initialQuantity,
   }));
 
   state.invoices.push(newInvoice);
@@ -110,71 +140,48 @@ export function addInvoice(invoice: Omit<Invoice, 'id'>): Invoice {
 }
 
 /**
- * Standardizes medicine sample names from the old legacy systems to match the exact spelling
- * of the new official system.
+ * Standardizes medicine sample names from the old legacy systems
  */
 export function standardizeSampleName(name: string): string {
   if (!name) return '';
   const trimmed = name.trim();
   const lower = trimmed.toLowerCase();
 
-  // Normalize Alefs, Yea's, and Tehs for highly accurate Arabic string matching
   const norm = lower
-    .replace(/[أإآ]/g, 'ا') // Normalize alef to plain l
-    .replace(/ة/g, 'ه')     // Normalize teh marbuta to heh
-    .replace(/ى/g, 'ي');    // Normalize alef maksura to yeh
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي');
 
-  // 1. ميلاتونين اقراص / أقراص ⬅️ ميلاتونين كبسول
   if (norm.includes('ميلاتونين') || norm.includes('ملاتونين') || norm.includes('melatonin')) {
     return 'ميلاتونين كبسول';
   }
-
-  // 2. انرجكس تو جو ⬅️ انرجكس تو جو امبول
-  if (norm.includes('انرجكس تو جو') || norm.includes('انرجكس توجو') || norm.includes('انرجيكس تو جو') || norm.includes('energex to go')) {
+  if (norm.includes('انرجكس تو جو') || norm.includes('انرجكس توجوا') || norm.includes('انرجيكس تو جو') || norm.includes('energex to go')) {
     return 'انرجكس تو جو امبول';
   }
-
-  // 3. ملتي ادلت اقراص ⬅️ ملتي فيتامين البالغين
   if (norm.includes('ملتي ادلت') || norm.includes('ادلت') || norm.includes('adult') || norm.includes('البالغين') || (norm.includes('ملتي') && norm.includes('فيتامين'))) {
     return 'ملتي فيتامين البالغين';
   }
-
-  // 4. فمنكس كالسيوم / فيمنكس كالسيوم ⬅️ فيمنكس كاليسوم
   if (norm.includes('كالسيوم') || norm.includes('كاليسوم') || norm.includes('calcium')) {
     return 'فيمنكس كاليسوم';
   }
-
-  // 5. جينكو بيلوا / جينكو بيلوبا ⬅️ جينكو بيلوبا كبسول
   if (norm.includes('جينكو') || norm.includes('ginkgo') || norm.includes('جينكو بيلوا') || norm.includes('جينكو بيلوبا')) {
     return 'جينكو بيلوبا كبسول';
   }
-
-  // 6. سوبر انرجكس ⬅️ سوبر انرجكس كبسول
   if (norm.includes('سوبر انرجكس') || norm.includes('سوبر انرجيكس') || norm.includes('سوبرانرجكس') || norm.includes('super energex')) {
     return 'سوبر انرجكس كبسول';
   }
-
-  // 7. جلوكزامين MSM ⬅️ جلوكوزامين ام اس ام
   if (norm.includes('جلوكزامين') || norm.includes('جلوكوزامين') || norm.includes('glucosamine') || norm.includes('msm')) {
     return 'جلوكوزامين ام اس ام';
   }
-
-  // 8. كولاجين ⬅️ كولاجين (90) كبسول
   if (norm.includes('كولاجين') || norm.includes('collagen')) {
     return 'كولاجين (90) كبسول';
   }
-
-  // 9. جوجوينت شراب ⬅️ جوجوينت شراب (not 10000)
   if (norm.includes('جوجوينت') || norm.includes('gojoint')) {
     return 'جوجوينت شراب';
   }
-
-  // 10. كرانبري 10000 / فمنكس كرانبري 10000 ⬅️ فيمنكس كرانبيري 10000
   if (norm.includes('كرانبري') || norm.includes('كرانبيري') || norm.includes('cranberry')) {
     return 'فيمنكس كرانبيري 10000';
   }
-
-  // Other system samples
   if (norm.includes('فيبر بلس') || norm.includes('فايبر بلس') || norm.includes('fiber plus')) {
     return 'فيبر بلس كبسول';
   }
@@ -197,7 +204,6 @@ export function standardizeSampleName(name: string): string {
     return 'ليوتن كبسول';
   }
 
-  // Direct exact mappings dictionary fallback
   const exactMappings: { [key: string]: string } = {
     'جوجوينت شراب': 'جوجوينت شراب',
     'كرانبري 10000': 'فيمنكس كرانبيري 10000',
@@ -216,44 +222,28 @@ export function standardizeSampleName(name: string): string {
     'جلوكزامين msm': 'جلوكوزامين ام اس ام',
   };
 
-  if (exactMappings[trimmed]) {
-    return exactMappings[trimmed];
-  }
-  if (exactMappings[lower]) {
-    return exactMappings[lower];
-  }
-
+  if (exactMappings[trimmed]) return exactMappings[trimmed];
+  if (exactMappings[lower]) return exactMappings[lower];
   return trimmed;
 }
 
-/**
- * Autocomplete matching function supporting minimum typing check
- */
 export function searchAutocomplete(type: 'sample' | 'doctor' | 'workplace', query: string): string[] {
   if (query.trim().length < 3) return [];
   const state = getInitialState();
   const q = query.toLowerCase();
 
   if (type === 'sample') {
-    // Collect all unique sample names across invoices
     const sampleNames = new Set<string>();
     state.invoices.forEach((inv) => inv.items.forEach((item) => sampleNames.add(item.sampleName)));
     return Array.from(sampleNames).filter((name) => name.toLowerCase().includes(q));
   } else if (type === 'doctor') {
-    return state.doctors
-      .map((d) => d.name)
-      .filter((name) => name.toLowerCase().includes(q));
+    return state.doctors.map((d) => d.name).filter((name) => name.toLowerCase().includes(q));
   } else if (type === 'workplace') {
-    return state.workplaces
-      .map((w) => w.name)
-      .filter((name) => name.toLowerCase().includes(q));
+    return state.workplaces.map((w) => w.name).filter((name) => name.toLowerCase().includes(q));
   }
   return [];
 }
 
-/**
- * Adds a new autocomplete entry if missing
- */
 export function registerNewEntity(type: 'doctor' | 'workplace', name: string, extra?: any): any {
   const state = getInitialState();
   const id = `${type === 'doctor' ? 'doc' : 'work'}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
@@ -269,7 +259,6 @@ export function registerNewEntity(type: 'doctor' | 'workplace', name: string, ex
     saveState(state);
     return newDoc;
   } else {
-    // Riyadh central coordinates default
     const newWorkplace: Workplace = {
       id,
       name,
@@ -282,9 +271,6 @@ export function registerNewEntity(type: 'doctor' | 'workplace', name: string, ex
   }
 }
 
-/**
- * Get available real-time aggregated FIFO stock
- */
 export function getSampleStockBalance(sampleName: string): number {
   const state = getInitialState();
   let total = 0;
@@ -298,9 +284,6 @@ export function getSampleStockBalance(sampleName: string): number {
   return total;
 }
 
-/**
- * Get available real-time stock bounded by visit date (invoice_date <= visit_date)
- */
 export function getSampleStockBalanceForDate(sampleName: string, visitDate: string): number {
   const state = getInitialState();
   let total = 0;
@@ -318,14 +301,10 @@ export function getSampleStockBalanceForDate(sampleName: string, visitDate: stri
   return total;
 }
 
-/**
- * Chronological FIFO Deduction logic restricted by visit date
- */
 export function deductFifoStock(sampleName: string, quantity: number, visitDate?: string): { invoiceItemId: string; quantityDeducted: number }[] {
   const state = getInitialState();
   const nameNorm = sampleName.trim().toLowerCase();
 
-  // Find all matching active invoice items with stock on or before visit date
   let items: { parentDate: string; item: InvoiceItem; parentIndex: number; itemIndex: number }[] = [];
   const vTime = visitDate ? new Date(visitDate).getTime() : Infinity;
 
@@ -345,7 +324,6 @@ export function deductFifoStock(sampleName: string, quantity: number, visitDate?
     }
   });
 
-  // Sort Chronologically (Oldest first) by Invoice Date
   items.sort((a, b) => new Date(a.parentDate).getTime() - new Date(b.parentDate).getTime());
 
   let remaining = quantity;
@@ -356,7 +334,6 @@ export function deductFifoStock(sampleName: string, quantity: number, visitDate?
 
     const avail = entry.item.currentQuantity;
     if (avail >= remaining) {
-      // Deduct all from this invoice
       state.invoices[entry.parentIndex].items[entry.itemIndex].currentQuantity -= remaining;
       deductions.push({
         invoiceItemId: entry.item.id,
@@ -364,7 +341,6 @@ export function deductFifoStock(sampleName: string, quantity: number, visitDate?
       });
       remaining = 0;
     } else {
-      // Empty this invoice item and move on
       state.invoices[entry.parentIndex].items[entry.itemIndex].currentQuantity = 0;
       deductions.push({
         invoiceItemId: entry.item.id,
@@ -378,16 +354,11 @@ export function deductFifoStock(sampleName: string, quantity: number, visitDate?
   return deductions;
 }
 
-/**
- * Saves a visit log and completes FIFO deductions internally with zero-quantity pass-through
- */
 export function addVisitLog(visit: Omit<VisitLog, 'id'>): VisitLog {
   const state = getInitialState();
   const id = `visit-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
 
-  // Process FIFO stock deductions
   const processedSamples: VisitSample[] = visit.samples.map((sample) => {
-    // RULE: ZERO-DEDUCTION PASS-THROUGH
     const deductions = sample.quantityDistributed === 0
       ? []
       : deductFifoStock(sample.sampleName, sample.quantityDistributed, visit.visitDate);
@@ -409,9 +380,6 @@ export function addVisitLog(visit: Omit<VisitLog, 'id'>): VisitLog {
   return finalVisit;
 }
 
-/**
- * Deletes a visit and initiates Cascade Stock Rollback!
- */
 export function deleteVisitLog(visitId: string) {
   const state = getInitialState();
   const visitIndex = state.visits.findIndex((v) => v.id === visitId);
@@ -419,10 +387,8 @@ export function deleteVisitLog(visitId: string) {
 
   const visit = state.visits[visitIndex];
 
-  // Rollback all deductions
   visit.samples.forEach((sample) => {
     sample.deductions.forEach((ded) => {
-      // Search for the specific invoice item
       state.invoices.forEach((inv, pIdx) => {
         inv.items.forEach((it, iIdx) => {
           if (it.id === ded.invoiceItemId) {
@@ -433,14 +399,10 @@ export function deleteVisitLog(visitId: string) {
     });
   });
 
-  // Remove the visit log
   state.visits.splice(visitIndex, 1);
   saveState(state);
 }
 
-/**
- * Gets historical info regarding a selected doctor
- */
 export function getDoctorLastVisitInfo(doctorName: string): { lastDate: string; samples: { name: string; qty: number }[] } | null {
   const state = getInitialState();
   const doctorVisits = state.visits
@@ -461,13 +423,8 @@ export function getDoctorLastVisitInfo(doctorName: string): { lastDate: string; 
   };
 }
 
-// -----------------------------------------------------
-// FILE SYSTEM SIMULATOR ENGINE
-// -----------------------------------------------------
-
 export function saveVirtualFile(file: VirtualFile) {
   const state = getInitialState();
-  // Filter out duplicate if existing
   state.files = state.files.filter((f) => !(f.name === file.name && f.folder === file.folder));
   state.files.push(file);
   saveState(state);
@@ -484,11 +441,8 @@ export function deleteVirtualFile(name: string, folder: 'BACKUP' | 'DOWNLOAD') {
   saveState(state);
 }
 
-// -----------------------------------------------------
-// GEOGRAPHICAL DISTANCE UTILITY
-// -----------------------------------------------------
 export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371e3; // Earth radius in meters
+  const R = 6371e3;
   const φ1 = (lat1 * Math.PI) / 180;
   const φ2 = (lat2 * Math.PI) / 180;
   const Δφ = ((lat2 - lat1) * Math.PI) / 180;
@@ -499,12 +453,9 @@ export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2
     Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return R * c; // meters
+  return R * c;
 }
 
-// -----------------------------------------------------
-// SMART SECURITY GUARDRAILS METRICS
-// -----------------------------------------------------
 export interface GuardrailAlarm {
   id: string;
   type: string;
@@ -519,7 +470,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
   const state = getInitialState();
   const alarms: GuardrailAlarm[] = [];
 
-  // 1. Geofencing Breach (>100 meters)
   state.visits.forEach((v) => {
     if (v.latitude && v.longitude && v.workplaceLatitude && v.workplaceLongitude) {
       const dist = calculateDistance(v.latitude, v.longitude, v.workplaceLatitude, v.workplaceLongitude);
@@ -537,7 +487,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
     }
   });
 
-  // 2. Ghost/Speed Call (< 2 minutes between check-in and check-out)
   state.visits.forEach((v) => {
     const inTime = new Date(v.checkInTime).getTime();
     const outTime = new Date(v.checkOutTime).getTime();
@@ -555,8 +504,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
     }
   });
 
-  // 3. Late Start/Early End (No morning activity by 10:00 AM or evening by 5:00 PM; or early close before 11:30 AM / 7:00 PM)
-  // Let's analyze activity per date
   const visitsByDate: { [date: string]: VisitLog[] } = {};
   state.visits.forEach((v) => {
     const d = v.visitDate;
@@ -565,7 +512,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
   });
 
   Object.entries(visitsByDate).forEach(([date, list]) => {
-    // Sort times
     const sorted = [...list].sort((a, b) => new Date(a.checkInTime).getTime() - new Date(b.checkInTime).getTime());
     const firstVisit = sorted[0];
     const lastVisit = sorted[sorted.length - 1];
@@ -576,7 +522,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
     const firstHour = firstCheckIn.getHours() + firstCheckIn.getMinutes() / 60;
     const lastHour = lastCheckOut.getHours() + lastCheckOut.getMinutes() / 60;
 
-    // Late morning start check (e.g., started afternoon or after 10 AM, and it is a morning shift day)
     if (firstHour > 10.0) {
       alarms.push({
         id: `late-start-${date}`,
@@ -589,8 +534,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
       });
     }
 
-    // Early morning close check (if morning closed before 11:30 AM)
-    // For simplicity, if we see action ending before 11:30 AM and nothing in evening
     if (lastHour < 11.5 && list.length < 3) {
       alarms.push({
         id: `early-close-${date}`,
@@ -598,24 +541,23 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
         titleAr: '🚨 إنهاء مبكر للعمل الميداني (Early End)',
         titleEn: '🚨 Early End Alert',
         descriptionAr: `التاريخ ${date}: انتهى آخر نشاط ميداني موثق مبكراً في تمام الساعة ${lastCheckOut.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}.`,
-        descriptionEn: `Date ${date}: Active field operations ended early at ${lastCheckOut.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}.`,
+        descriptionEn: `Date ${date}: Active field operations ended early at ${lastCheckOut.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}).`,
         severity: 'red',
       });
     }
   });
 
-  // 4. Inactivity Alert (Gap of >1.5-2 hours between consecutive visits in the same day)
   Object.entries(visitsByDate).forEach(([date, list]) => {
     const sorted = [...list].sort((a, b) => new Date(a.checkInTime).getTime() - new Date(b.checkInTime).getTime());
     for (let i = 0; i < sorted.length - 1; i++) {
       const endPrev = new Date(sorted[i].checkOutTime).getTime();
       const startNext = new Date(sorted[i + 1].checkInTime).getTime();
       const gapMins = (startNext - endPrev) / 1000 / 60;
-      if (gapMins > 110) { // ~1.8 hours
+      if (gapMins > 110) {
         alarms.push({
           id: `inactivity-${date}-${i}`,
           type: 'Inactivity Alert',
-          titleAr: '🚨 فجوة حمولة خمول ميداني (Inactivity Alert)',
+          titleAr: '🚨 فجوة خمول ميداني (Inactivity Alert)',
           titleEn: '🚨 Inactivity Alert',
           descriptionAr: `التاريخ ${date}: فجوة خمول ميداني مدتها ${(gapMins / 60).toFixed(1)} ساعة بين زيارة ${sorted[i].doctorName || 'العميل'} والزيارة التي تليها.`,
           descriptionEn: `Date ${date}: Long field gap of ${(gapMins / 60).toFixed(1)} hours detected between visits.`,
@@ -625,9 +567,8 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
     }
   });
 
-  // 5. Class A Neglect (No visits for >14 days for Class A doctors)
   const classADoctors = state.doctors.filter((d) => d.classRating === 'A');
-  const now = new Date('2026-06-02T21:48:19Z').getTime(); // Current mock time anchor
+  const now = new Date().getTime();
   
   classADoctors.forEach((doc) => {
     const docVisits = state.visits.filter((v) => v.doctorName && v.doctorName.trim() === doc.name.trim());
@@ -659,7 +600,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
     }
   });
 
-  // 6. Over-visiting Warning (> 4 times a week to the same client)
   const visitsByDoc: { [doc: string]: number } = {};
   state.visits.forEach((v) => {
     if (v.doctorName) {
@@ -680,7 +620,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
     }
   });
 
-  // 7. Route Deviation (> 30% unplanned visits)
   const unplannedVisits = state.visits.filter((v) => v.isUnplanned);
   const routeCompliancePct = state.visits.length > 0 ? ((state.visits.length - unplannedVisits.length) / state.visits.length) * 100 : 100;
   if (routeCompliancePct < 70) {
@@ -698,9 +637,6 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
   return alarms;
 }
 
-/**
- * Truncates and resets the local storage database state fully (Zero-State Database Purge)
- */
 export function purgeDatabase() {
   const emptyState: DatabaseState = {
     version: DB_VERSION,
@@ -718,15 +654,11 @@ export function purgeDatabase() {
   };
   saveState(emptyState);
   
-  // Clear other profile and configuration states
   localStorage.removeItem('medrep_representative_name');
   localStorage.removeItem('medrep_representative_grade');
   localStorage.removeItem('corporate_logo');
 }
 
-/**
- * Dynamic Editing Pipeline: Atomic rollback, validation and reallocation of visit sample quantity
- */
 export function updateVisitSampleStrictFIFO(
   visitId: string,
   sampleName: string,
@@ -744,7 +676,6 @@ export function updateVisitSampleStrictFIFO(
     (s) => s.sampleName.trim().toLowerCase() === sampleName.trim().toLowerCase()
   );
 
-  // 1. ROLLBACK: Re-add old deductions back to active stock
   if (sampleIndex !== -1) {
     const oldSample = visit.samples[sampleIndex];
     oldSample.deductions.forEach((ded) => {
@@ -756,26 +687,21 @@ export function updateVisitSampleStrictFIFO(
         });
       });
     });
-    // Remove the sample from the visit samples temporarily
     visit.samples.splice(sampleIndex, 1);
   }
 
-  // Save temporary progress so state queries reflect rolled-back stock
   saveState(state);
 
-  // 2. RE-VALIDATE: check date-bounded stock after rollback returns
   const availableStock = getSampleStockBalanceForDate(sampleName, visitDate);
   if (newQuantity > availableStock) {
     throw new Error(`CONSTRAINTS_VIOLATION: الكمية المطلوبة تتجاوز المخزون المقيد بالتاريخ! المتاح هو ${availableStock}`);
   }
 
-  // 3. RE-ALLOCATE: re-run FIFO queue if quantity > 0
   let deductions: { invoiceItemId: string; quantityDeducted: number }[] = [];
   if (newQuantity > 0) {
     deductions = deductFifoStock(sampleName, newQuantity, visitDate);
   }
 
-  // Reload current state (as deductFifoStock has modified and saved invoice records)
   const finalState = getInitialState();
   const finalVisit = finalState.visits.find((v) => v.id === visitId);
   if (finalVisit) {
@@ -788,10 +714,6 @@ export function updateVisitSampleStrictFIFO(
   }
 }
 
-/**
- * Atomic Full Visit Editor: Rollback all old sample stocks, update attributes (workplaceName, doctorClass rating, notes),
- * and re-calculate FIFO deductions for all requested sample allocations dynamically.
- */
 export function updateFullVisitLog(
   visitId: string,
   updatedData: {
@@ -809,7 +731,6 @@ export function updateFullVisitLog(
 
   const visit = state.visits[visitIndex];
 
-  // 1. ROLLBACK: Return all previously deducted visit samples back to invoices stock
   visit.samples.forEach((oldSample) => {
     oldSample.deductions.forEach((ded) => {
       state.invoices.forEach((inv, pIdx) => {
@@ -822,10 +743,8 @@ export function updateFullVisitLog(
     });
   });
 
-  // Temporarily preserve this state to allow available stock levels lookup to see the rolled back balance
   saveState(state);
 
-  // 2. RE-VALIDATE: Inspect stock availability for every single sample requested in the update
   const visitDate = visit.visitDate;
   for (const sItem of updatedData.samples) {
     if (sItem.quantityDistributed <= 0) continue;
@@ -837,7 +756,6 @@ export function updateFullVisitLog(
     }
   }
 
-  // 3. RE-ALLOCATE: Apply strict chronological FIFO deductions for each updated sample
   const newSamplesWithDeductions: VisitSample[] = [];
   for (const sItem of updatedData.samples) {
     let deductions: { invoiceItemId: string; quantityDeducted: number }[] = [];
@@ -851,7 +769,6 @@ export function updateFullVisitLog(
     });
   }
 
-  // 4. PERSIST FINAL ATTRIBUTES: Reload final state, copy updated data and save
   const finalState = getInitialState();
   const finalVisit = finalState.visits.find((v) => v.id === visitId);
   if (!finalVisit) {
@@ -862,7 +779,6 @@ export function updateFullVisitLog(
     const wpTrimmed = updatedData.workplaceName.trim();
     finalVisit.workplaceName = wpTrimmed;
 
-    // Check if workplace exists or create a placeholder
     let matchedWp = finalState.workplaces.find(
       (w) => w.name.trim().toLowerCase() === wpTrimmed.toLowerCase()
     );
@@ -898,10 +814,6 @@ export function updateFullVisitLog(
   saveState(finalState);
 }
 
-/**
- * Recalculates and processes FIFO deductions for all visits in chronological sequence.
- * It resets all invoice current quantities and rebuilds all visit deductions from scratch.
- */
 export function recomputeAllFifoDeductions(): {
   success: boolean;
   processedVisitsCount: number;
@@ -911,27 +823,22 @@ export function recomputeAllFifoDeductions(): {
   const state = getInitialState();
   const alarms: string[] = [];
 
-  // 1. Reset all invoice items to initial quantities
   state.invoices.forEach((inv) => {
     inv.items.forEach((item) => {
       item.currentQuantity = item.initialQuantity;
     });
   });
 
-  // Save to let local reads inside deductFifoStock run on clean stock
   saveState(state);
 
-  // 2. Sort all visits chronologically
   const sortedVisits = [...state.visits].sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime());
 
   let totalDeductions = 0;
 
-  // 3. Sequential FIFO deductions
   for (let i = 0; i < sortedVisits.length; i++) {
     const visit = sortedVisits[i];
     const dateStr = visit.visitDate;
 
-    // We will call the database-saving deductFifoStock, which will automatically deduct from invoices
     visit.samples = visit.samples.map((sample) => {
       const requestedQty = sample.quantityDistributed;
       if (requestedQty <= 0) {
@@ -942,7 +849,6 @@ export function recomputeAllFifoDeductions(): {
         };
       }
 
-      // Check available stock up to this date
       const available = getSampleStockBalanceForDate(sample.sampleName, dateStr);
       if (requestedQty > available) {
         alarms.push(
@@ -960,7 +866,6 @@ export function recomputeAllFifoDeductions(): {
       };
     });
 
-    // Now find this visit in the actual state and update its samples
     const stateToSave = getInitialState();
     const vIdx = stateToSave.visits.findIndex((v) => v.id === visit.id);
     if (vIdx !== -1) {
@@ -977,14 +882,10 @@ export function recomputeAllFifoDeductions(): {
   };
 }
 
-/**
- * Deletes all imported/migrated historical visits and resets stock allocations
- */
 export function wipeAllMigratedVisitsAndRestoreStock(): { deletedCount: number } {
   const state = getInitialState();
   const originalCount = state.visits.length;
 
-  // Extremely robust filter out any visits that are historically imported or matching month prefixes
   state.visits = state.visits.filter((v) => {
     if (!v) return false;
     const dateStr = typeof v.visitDate === 'string' ? v.visitDate.trim() : '';
@@ -1017,7 +918,6 @@ export function wipeAllMigratedVisitsAndRestoreStock(): { deletedCount: number }
 
   const deletedCount = originalCount - state.visits.length;
 
-  // Reset all invoice current quantities back to initialQuantity first
   state.invoices.forEach((inv) => {
     inv.items.forEach((item) => {
       item.currentQuantity = item.initialQuantity;
@@ -1026,7 +926,6 @@ export function wipeAllMigratedVisitsAndRestoreStock(): { deletedCount: number }
 
   saveState(state);
 
-  // Recompute FIFO deductions for whatever visits are left (the non-imported ones, if any)
   if (state.visits.length > 0) {
     recomputeAllFifoDeductions();
   }
@@ -1034,21 +933,16 @@ export function wipeAllMigratedVisitsAndRestoreStock(): { deletedCount: number }
   return { deletedCount };
 }
 
-/**
- * Fully wipes all visits, doctors, workplaces, weekly plans and restores all invoice stock quantities back to initial values
- */
 export function wipeAllDataComplete(): { deletedVisitsCount: number; deletedDoctorsCount: number } {
   const state = getInitialState();
   const deletedVisitsCount = state.visits.length;
   const deletedDoctorsCount = state.doctors.length;
 
-  // Clear data
   state.visits = [];
   state.doctors = [];
   state.workplaces = [];
   state.weeklyCycles = [];
 
-  // Reset stock to equal original invoice entries exactly
   state.invoices.forEach((inv) => {
     inv.items.forEach((item) => {
       item.currentQuantity = item.initialQuantity;
@@ -1059,9 +953,6 @@ export function wipeAllDataComplete(): { deletedVisitsCount: number; deletedDoct
   return { deletedVisitsCount, deletedDoctorsCount };
 }
 
-/**
- * Migration Processor for legacy JSON doctor imports and historical visits with retroactive FIFO
- */
 export function migrateDoctorsFromLegacyJson(jsonList: any[]): void {
   const state = getInitialState();
   
@@ -1070,7 +961,6 @@ export function migrateDoctorsFromLegacyJson(jsonList: any[]): void {
     const doctorName = (doc.doctor_name || doc.doctorName || doc.name || '').trim();
     if (!doctorName) return;
 
-    // Insert workplace if missing
     let matchedWp = state.workplaces.find(
       (w) => w.name.trim().toLowerCase() === workplaceName.toLowerCase()
     );
@@ -1084,7 +974,6 @@ export function migrateDoctorsFromLegacyJson(jsonList: any[]): void {
       state.workplaces.push(matchedWp);
     }
 
-    // Insert doctor if missing
     let matchedDoc = state.doctors.find(
       (d) => d.name.trim().toLowerCase() === doctorName.toLowerCase()
     );
@@ -1103,7 +992,6 @@ export function migrateDoctorsFromLegacyJson(jsonList: any[]): void {
 }
 
 export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): { successCount: number; errors: string[] } {
-  // Sort visits chronologically, as retroactive FIFO depends on oldest-first visiting path
   const sorted = [...parsedHtmlVisits].sort((a, b) => {
     const dateA = a.visit_date || a.date || '';
     const dateB = b.visit_date || b.date || '';
@@ -1119,20 +1007,14 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
       const doctorName = (item.doctor_name || item.doctor || '').trim();
       const workplaceName = (item.workplace_name || item.workplace || 'مكان عمل غير محدد').trim();
 
-      if (!visitDateStr) {
-        throw new Error('تاريخ الزيارة مفقود.');
-      }
-      if (!doctorName) {
-        throw new Error('اسم الطبيب مفقود.');
-      }
+      if (!visitDateStr) throw new Error('تاريخ الزيارة مفقود.');
+      if (!doctorName) throw new Error('اسم الطبيب مفقود.');
 
       const state = getInitialState();
-      // Look up doctor
       let matchedDoc = state.doctors.find(
         (d) => d.name.trim().toLowerCase() === doctorName.toLowerCase()
       );
       if (!matchedDoc) {
-        // Register doc and workplace implicitly
         migrateDoctorsFromLegacyJson([{
           doctor_name: doctorName,
           workplace_name: workplaceName,
@@ -1144,13 +1026,11 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
         );
       }
 
-      // Find workplace
       const finalState = getInitialState();
       const matchedWp = finalState.workplaces.find(
         (w) => w.name.trim().toLowerCase() === workplaceName.toLowerCase()
       );
 
-      // Support both nested samples (items array) or single sample top-level keys
       const sampleItems: VisitSample[] = [];
       if (item.items && Array.isArray(item.items)) {
         for (const subItem of item.items) {
@@ -1170,7 +1050,6 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
         }
       }
 
-      // Construct visit payload
       const visitPayload: Omit<VisitLog, 'id'> = {
         visitDate: visitDateStr,
         clientType: 'Doctor',
@@ -1189,7 +1068,6 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
         isUnplanned: false,
       };
 
-      // Deduct stock before adding visit log to test stock level
       for (const sItem of sampleItems) {
         const availStock = getSampleStockBalanceForDate(sItem.sampleName, visitDateStr);
         if (sItem.quantityDistributed > availStock) {
@@ -1197,7 +1075,6 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
         }
       }
 
-      // Add actual visit log (which performs chronological FIFO details internally)
       addVisitLog(visitPayload);
       successCount++;
     } catch (e: any) {
@@ -1207,4 +1084,3 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
 
   return { successCount, errors };
 }
-

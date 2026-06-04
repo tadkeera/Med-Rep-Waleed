@@ -5,8 +5,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { getInitialState, saveVirtualFile } from '../utils/db';
-import { FileText, Search, TrendingUp, Sparkles, Download, Calendar, Loader } from 'lucide-react';
+import { FileText, Search, TrendingUp, Sparkles, Download, Printer, Calendar, Loader } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { jsPDF } from 'jspdf';
 
 interface ReportsViewProps {
   lang: 'ar' | 'en';
@@ -147,7 +148,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
     avgIntervalDays = Math.round(diffSum / (doctorVisits.length - 1));
   } else {
     // If only one visit, gap is from that visit date to today
-    const mockToday = new Date('2026-06-02').getTime();
+    const mockToday = new Date().getTime();
     if (doctorVisits.length === 1) {
       const d = new Date(doctorVisits[0].visitDate).getTime();
       avgIntervalDays = Math.round((mockToday - d) / (1000 * 60 * 60 * 24));
@@ -189,10 +190,10 @@ export default function ReportsView({ lang }: ReportsViewProps) {
     }
   };
 
-  // HTML Export mechanism for /Med Rep/DOWNLOAD/
-  const exportGeneratedReport = () => {
+  // HTML, PDF, and Print/Save PDF multi-format exporter
+  const exportGeneratedReport = (format: 'html' | 'pdf' | 'print') => {
     let exportHtml = '';
-    let fileName = '';
+    let docTitle = '';
     const logoBase64 = localStorage.getItem('corporate_logo');
     
     // Stamped image tag based on direction
@@ -206,7 +207,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       : '';
 
     if (reportType === 'sample') {
-      fileName = `report_sample_${selectedSample.replace(/\s+/g, '_')}.html`;
+      docTitle = `report_sample_${selectedSample.replace(/\s+/g, '_')}`;
       exportHtml = `
 <!DOCTYPE html>
 <html dir="${lang === 'ar' ? 'rtl' : 'ltr'}" lang="${lang}">
@@ -214,47 +215,52 @@ export default function ReportsView({ lang }: ReportsViewProps) {
   <meta charset="UTF-8">
   <title>تقرير تفريغ عينة - ${selectedSample}</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 25px; color: #1e293b; background: #fafafa; }
-    h1 { color: #0f172a; margin-top: 0; padding-bottom: 10px; font-size: 20px; }
-    table { width: 100%; border-collapse: collapse; background: #fff; margin-top: 15px; }
-    th { background: #3b82f6; color: white; padding: 12px; font-size: 13px; text-align: right; }
-    td { padding: 12px; border: 1px solid #e2e8f0; font-size: 12px; }
+    body { font-family: 'Arial', sans-serif; padding: 25px; color: #1e293b; background: #fff; }
+    h1 { color: #1e3a8a; margin-top: 0; padding-bottom: 10px; font-size: 20px; border-bottom: 2px solid #3b82f6; }
+    .stat-badge { background: #eff6ff; border: 1px solid #bfdbfe; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 12px; color: #1e40af; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th { background: #3b82f6; color: white; padding: 10px; font-size: 12px; text-align: ${lang === 'ar' ? 'right' : 'left'}; }
+    td { padding: 10px; border: 1px solid #e2e8f0; font-size: 11px; }
     tr:nth-child(even) { background: #f8fafc; }
   </style>
 </head>
 <body>
   ${logoImgTag}
-  <h1>تقرير تفريغ صنف [ ${selectedSample} ] من تاريخ ${dateFrom} إلى ${dateTo}</h1>
+  <h1>${lang === 'ar' ? `تقرير تفريغ صنف [ ${selectedSample} ]` : `Sample Ledger [ ${selectedSample} ]`}</h1>
+  <div class="stat-badge">
+    <strong>${lang === 'ar' ? 'الصنف الترويجي:' : 'Sample Item:'}</strong> ${selectedSample}<br/>
+    <strong>${lang === 'ar' ? 'الفترة الزمنية للتقرير:' : 'Time Interval:'}</strong> ${lang === 'ar' ? 'من' : 'From'} ${dateFrom} ${lang === 'ar' ? 'إلى' : 'To'} ${dateTo}
+  </div>
   <table>
     <thead>
       <tr>
-        <th>تاريخ الزيارة</th>
-        <th>اسم الطبيب</th>
-        <th>عدد العينات المصروفة</th>
-        <th>مكان العمل</th>
-        <th>ملاحظات</th>
+        <th>${lang === 'ar' ? 'تاريخ الزيارة' : 'Visit Date'}</th>
+        <th>${lang === 'ar' ? 'اسم الطبيب' : 'Doctor Name'}</th>
+        <th>${lang === 'ar' ? 'عدد العينات المصروفة' : 'Qty Distributed'}</th>
+        <th>${lang === 'ar' ? 'مكان العمل والعيادة' : 'Workplace'}</th>
+        <th>${lang === 'ar' ? 'ملاحظات' : 'Notes'}</th>
       </tr>
     </thead>
     <tbody>
-      ${filteredVisitsForSample.map(v => {
+      ${filteredVisitsForSample.length > 0 ? filteredVisitsForSample.map(v => {
         const sInfo = v.samples.find(s => s.sampleName === selectedSample);
         return `
           <tr>
             <td>${v.visitDate}</td>
-            <td>${v.doctorName || 'عميل خارجي'}</td>
-            <td>${sInfo?.quantityDistributed || 0} وحدة</td>
+            <td>${v.doctorName || (lang === 'ar' ? 'عميل خارجي' : 'External client')}</td>
+            <td style="font-weight: bold; color: #16a34a;">${sInfo?.quantityDistributed || 0} ${lang === 'ar' ? 'وحدة' : 'Units'}</td>
             <td>${v.workplaceName}</td>
-            <td>${v.notes}</td>
+            <td>${v.notes || '-'}</td>
           </tr>
         `;
-      }).join('')}
+      }).join('') : `<tr><td colspan="5" style="text-align: center; color: #94a3b8;">${lang === 'ar' ? 'لا توجد بيانات متاحة لهذا الصنف' : 'No entries available.'}</td></tr>`}
     </tbody>
   </table>
 </body>
 </html>
       `;
     } else {
-      fileName = `report_doctor_${selectedDoctor.replace(/\s+/g, '_')}.html`;
+      docTitle = `report_doctor_${selectedDoctor.replace(/\s+/g, '_')}`;
       exportHtml = `
 <!DOCTYPE html>
 <html dir="${lang === 'ar' ? 'rtl' : 'ltr'}" lang="${lang}">
@@ -262,37 +268,38 @@ export default function ReportsView({ lang }: ReportsViewProps) {
   <meta charset="UTF-8">
   <title>تقرير الطبيب التفصيلي - ${selectedDoctor}</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 25px; color: #1e293b; }
-    h1 { margin-top: 0; padding-bottom: 10px; }
-    .stat-box { background: #f3e8ff; border: 1px solid #d8b4fe; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-    table { width: 100%; border-collapse: collapse; }
-    th { background: #8b5cf6; color: white; padding: 12px; }
-    td { padding: 12px; border: 1px solid #ddd; }
+    body { font-family: 'Arial', sans-serif; padding: 25px; color: #1e293b; background: #fff; }
+    h1 { color: #5b21b6; margin-top: 0; padding-bottom: 10px; font-size: 20px; border-bottom: 2px solid #8b5cf6; }
+    .stat-box { background: #faf5ff; border: 1px solid #e9d5ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 12px; color: #5b21b6; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th { background: #8b5cf6; color: white; padding: 10px; font-size: 12px; text-align: ${lang === 'ar' ? 'right' : 'left'}; }
+    td { padding: 10px; border: 1px solid #e2e8f0; font-size: 11px; }
+    tr:nth-child(even) { background: #fdfeff; }
   </style>
 </head>
 <body>
   ${logoImgTag}
-  <h1>خط السير التفصيلي للطبيب: ${selectedDoctor}</h1>
+  <h1>${lang === 'ar' ? `خط السير التفصيلي والمؤشر الميداني للطبيب: ${selectedDoctor}` : `Detailed SFA Report for Doctor: ${selectedDoctor}`}</h1>
   <div class="stat-box">
-    <strong>إجمالي الزيارات:</strong> ${doctorVisits.length} زيارات في الفترة المحددة.<br>
-    <strong>العينات المصروفة مسبقاً:</strong> ${Object.entries(docProductShares).map(([k,v]) => `${k} (${v} وحدات)`).join(' ، ')}
+    <strong>${lang === 'ar' ? 'إجمالي المتابعات الميدانية:' : 'Total Completed Field Visits:'}</strong> ${doctorVisits.length} ${lang === 'ar' ? 'زيارة ناجحة.' : 'visits.'}<br>
+    <strong>${lang === 'ar' ? 'إجمالي الدفعات الترويجية والدوائية المصروفة للطبيب:' : 'Medicine Sample Packages Provided:'}</strong> ${Object.entries(docProductShares).map(([k,v]) => `${k} (${v} ${lang === 'ar' ? 'وحدات' : 'units'})`).join(' ، ') || (lang === 'ar' ? 'نظيفة تماماً' : 'None')}
   </div>
   <table>
     <thead>
       <tr>
-        <th>التاريخ</th>
-        <th>الذروة والنشاط الموثق</th>
-        <th>مذكرات وملاحظات الزيارة</th>
+        <th>${lang === 'ar' ? 'التاريخ الفعلي' : 'Date'}</th>
+        <th>${lang === 'ar' ? 'العيادة والمنشأة الطبية المعينة' : 'Visited Workplace'}</th>
+        <th>${lang === 'ar' ? 'ملاحظات والتزامات المتابعة' : 'Detailing and Scientific Notes'}</th>
       </tr>
     </thead>
     <tbody>
-      ${doctorVisits.map(v => `
+      ${doctorVisits.length > 0 ? doctorVisits.map(v => `
         <tr>
           <td>${v.visitDate}</td>
           <td>${v.workplaceName}</td>
-          <td>${v.notes}</td>
+          <td>${v.notes || '-'}</td>
         </tr>
-      `).join('')}
+      `).join('') : `<tr><td colspan="3" style="text-align: center; color: #94a3b8;">${lang === 'ar' ? 'لم يسجل زيارات في هذه الفترة' : 'No records.'}</td></tr>`}
     </tbody>
   </table>
 </body>
@@ -300,16 +307,144 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       `;
     }
 
-    saveVirtualFile({
-      name: fileName,
-      size: `${(exportHtml.length / 1024).toFixed(1)} KB`,
-      dateModified: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      folder: 'DOWNLOAD',
-      content: exportHtml,
-      type: 'html',
-    });
+    if (format === 'html') {
+      saveVirtualFile({
+        name: `${docTitle}.html`,
+        size: `${(exportHtml.length / 1024).toFixed(1)} KB`,
+        dateModified: new Date().toISOString().replace('T', ' ').substring(0, 16),
+        folder: 'DOWNLOAD',
+        content: exportHtml,
+        type: 'html',
+      });
+      alert(t.exportSuccess);
+    } else if (format === 'print') {
+      // High-Fidelity Printable popup which lets user Save directly to PDF with colors and fonts
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(`
+          <html>
+            <head>
+              <title>${docTitle}</title>
+              <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+              <style>
+                body { margin: 0; padding: 25px; font-family: 'Cairo', sans-serif; background-color: #ffffff; }
+                @media print {
+                  body { padding: 0; }
+                  .no-print-btn { display: none !important; }
+                }
+              </style>
+            </head>
+            <body>
+              <div style="max-width: 800px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;" class="no-print-btn">
+                  <button onclick="window.print();" style="background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; font-family: 'Cairo', sans-serif; font-size: 13px;">
+                    ${lang === 'ar' ? '🖨️ ابدأ الطباعة الملونة / حفظ كـ PDF فوري' : '🖨️ Direct Print / Save to PDF'}
+                  </button>
+                  <span style="font-size: 11px; color: #94a3b8; font-family: monospace;">Med Rep Diagnostic Engine</span>
+                </div>
+                ${exportHtml}
+              </div>
+              <script>
+                window.onload = function() {
+                  setTimeout(function() { window.print(); }, 500);
+                }
+              </script>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+    } else if (format === 'pdf') {
+      // Real binary pdf using downloaded jsPDF bundle library
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      // Page styling borders
+      pdf.setDrawColor(200, 220, 255);
+      pdf.setFillColor(255, 255, 255);
+      pdf.roundedRect(6, 6, 198, 285, 3, 3, 'FD');
+      
+      // Header Text Draw
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(30, 41, 59);
+      pdf.setFontSize(14);
+      pdf.text(reportType === 'sample' ? 'SFA PRODUCT LEDGER COMPILATION' : 'COMPREHENSIVE TARGET PHYSICIAN LOG', 15, 20);
 
-    alert(t.exportSuccess);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(100, 116, 139);
+      pdf.setFontSize(9);
+      pdf.text(`Generated Date: ${new Date().toISOString().replace('T', ' ').substring(0, 16)}`, 15, 26);
+      pdf.text(`Interval constraint: ${dateFrom} - ${dateTo}`, 15, 31);
+
+      // Report Specific lines drawing
+      pdf.setDrawColor(226, 232, 240);
+      pdf.line(15, 35, 195, 35);
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(79, 70, 229);
+      pdf.setFontSize(11);
+      if (reportType === 'sample') {
+        pdf.text(`Medicine Target Class: ${selectedSample}`, 15, 42);
+        
+        pdf.setFontSize(9);
+        pdf.setTextColor(15, 23, 42);
+        pdf.text('Date', 15, 52);
+        pdf.text('Attending SFA Physician', 40, 52);
+        pdf.text('Assigned Target Workplace', 105, 52);
+        pdf.text('Distributed Qty', 170, 52);
+        pdf.line(15, 55, 195, 55);
+
+        let rowY = 62;
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(71, 85, 105);
+        
+        filteredVisitsForSample.forEach((v) => {
+          if (rowY > 270) {
+            pdf.addPage();
+            // redraw page styling border on next page
+            pdf.setDrawColor(200, 220, 255);
+            pdf.setFillColor(255, 255, 255);
+            pdf.roundedRect(6, 6, 198, 285, 3, 3, 'FD');
+            rowY = 20;
+          }
+          const sInfo = v.samples.find(s => s.sampleName === selectedSample);
+          pdf.text(String(v.visitDate), 15, rowY);
+          pdf.text(String(v.doctorName || 'External Doctor'), 40, rowY);
+          pdf.text(String(v.workplaceName).substring(0, 32), 105, rowY);
+          pdf.text(`${sInfo?.quantityDistributed || 0} Units`, 170, rowY);
+          rowY += 9;
+        });
+      } else {
+        pdf.text(`Physician Record Subject: ${selectedDoctor}`, 15, 42);
+        
+        pdf.setFontSize(9);
+        pdf.setTextColor(15, 23, 42);
+        pdf.text('Date', 15, 52);
+        pdf.text('Visited Workplace Hub', 40, 52);
+        pdf.text('Clinical and Representative Notes', 110, 52);
+        pdf.line(15, 55, 195, 55);
+
+        let rowY = 62;
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(71, 85, 105);
+
+        doctorVisits.forEach((v) => {
+          if (rowY > 270) {
+            pdf.addPage();
+            // redraw page styling border on next page
+            pdf.setDrawColor(200, 220, 255);
+            pdf.setFillColor(255, 255, 255);
+            pdf.roundedRect(6, 6, 198, 285, 3, 3, 'FD');
+            rowY = 20;
+          }
+          pdf.text(String(v.visitDate), 15, rowY);
+          pdf.text(String(v.workplaceName).substring(0, 32), 40, rowY);
+          pdf.text(String(v.notes || 'No notes').substring(0, 48), 110, rowY);
+          rowY += 9;
+        });
+      }
+
+      pdf.save(`${docTitle}.pdf`);
+    }
   };
 
   return (
@@ -330,14 +465,37 @@ export default function ReportsView({ lang }: ReportsViewProps) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={exportGeneratedReport}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <Download className="w-4 h-4" />
-          {t.generateHtml}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => exportGeneratedReport('html')}
+            className="px-3.5 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="حفظ بصيغة HTML في أرشيف المستندات"
+          >
+            <Download className="w-4 h-4" />
+            {lang === 'ar' ? 'تصدير كمستند HTML' : 'Save to Archive HTML'}
+          </button>
+          
+          <button
+            type="button"
+            onClick={() => exportGeneratedReport('pdf')}
+            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm shadow-indigo-600/10"
+            title="تحميل ملف PDF فوري"
+          >
+            <FileText className="w-4 h-4" />
+            {lang === 'ar' ? 'تحميل PDF رسمي' : 'Download PDF Binary'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => exportGeneratedReport('print')}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm shadow-emerald-600/10"
+            title="طباعة التقرير بالكامل"
+          >
+            <Printer className="w-4 h-4" />
+            {lang === 'ar' ? 'طباعة وحفظ PDF ملون' : 'Print / Save PDF Preview'}
+          </button>
+        </div>
       </div>
 
       {/* Tabs of Reports */}

@@ -1,0 +1,18 @@
+{
+  "short_name": "MedRep",
+  "name": "Med Rep - مندوب الدعاية الطبية الذكي",
+  "description": "نظام الأتمتة والتحقق الذكي لممثلي الأدوية والزيارات الطبية الميدانية (SFA/CRM Offline Compatible)",
+  "icons": [
+    {
+      "src": "https://ai.google.dev/static/site-assets/images/share-ais-513315318.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "display": "standalone",
+  "orientation": "portrait"
+}

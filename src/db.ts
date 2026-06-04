@@ -172,15 +172,6 @@ const CURRENT_VAL_VERSION = '1.0';
  * Initializes/Fetches the DB from LocalStorage
  */
 export function getSqlDbState(): SqlDatabaseState {
-  // Programmatic one-time fresh boot sequence to purge all test database entries and corporate assets
-  if (localStorage.getItem('medrep_fresh_reset_done_v2') !== 'true') {
-    localStorage.removeItem(SQL_STORAGE_KEY);
-    localStorage.removeItem('corporate_logo');
-    localStorage.removeItem('medrep_representative_name');
-    localStorage.removeItem('medrep_representative_grade');
-    localStorage.setItem('medrep_fresh_reset_done_v2', 'true');
-  }
-
   const data = localStorage.getItem(SQL_STORAGE_KEY);
   if (data) {
     try {

@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getInitialState, evaluateGuardrailAlarms, GuardrailAlarm } from '../utils/db';
-import { AlertTriangle, CheckCircle, TrendingUp, Calendar, Users, MapPin, Package, Award } from 'lucide-react';
+import { AlertTriangle, CheckCircle, TrendingUp, Calendar, Users, MapPin, Package, Award, Clock } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface DashboardViewProps {
@@ -25,7 +25,7 @@ export default function DashboardView({ lang }: DashboardViewProps) {
   const t = {
     ar: {
       title: 'لوحة التحكم والمؤشرات الذكية',
-      kpiCallRate: 'معدل المكالمات اليومية / الأسبوعية',
+      kpiCallRate: 'معدل المكالمات للأسبوع الحالي',
       kpiCoverage: 'نسبة تغطية العملاء المستهدفين',
       kpiRoute: 'نسبة الالتزام بخط السير والموقع',
       kpiFocus: 'تقرير تركيز المنتجات الشائع تفصيلها',
@@ -49,10 +49,12 @@ export default function DashboardView({ lang }: DashboardViewProps) {
       leaderGrade: 'مستوى فعالية الاستهداف',
       rankValue: 'المركز الأول (🥇 1st Place)',
       gradeDesc: 'ممتاز جداً (Grade A+)',
+      stockWarnings: '⚠️ تنبيهات المخزون الذكي وصلاحية الدفعات:',
+      lowStockMsg: 'تنبيه انخفاض مخزون: الصنف [NAME] شارف على النفاد (المتبقي: QTY علب).',
     },
     en: {
       title: 'Dashboard & Smart SFA Indicators',
-      kpiCallRate: 'Daily / Weekly Call Rate',
+      kpiCallRate: 'Current Week Call Rate',
       kpiCoverage: 'Target Customer Coverage %',
       kpiRoute: 'Route & GPS Compliance %',
       kpiFocus: 'Product focus - Detailing Shares',
@@ -76,6 +78,8 @@ export default function DashboardView({ lang }: DashboardViewProps) {
       leaderGrade: 'Targeting Execution & Quality Class',
       rankValue: '1st Place Rank',
       gradeDesc: 'Excellent (Grade A+)',
+      stockWarnings: '⚠️ Intelligent Stock & Expiration Warnings:',
+      lowStockMsg: 'Low inventory alert: [NAME] is running out (Remaining: QTY units).',
     },
   }[lang];
 
@@ -99,32 +103,64 @@ export default function DashboardView({ lang }: DashboardViewProps) {
     });
   });
 
-  // Call Rate calculation: Target 6 visits per week. Actual depends on db.
+  // =====================================================================================
+  // دقة الفلترة: حساب الزيارات التي وقعت في الأسبوع الحالي فقط (حل النقطة 8)
+  // =====================================================================================
+  const getStartOfWeek = (d: Date) => {
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday is start
+    return new Date(d.setDate(diff));
+  };
+  const startOfWeekDate = getStartOfWeek(new Date());
+  startOfWeekDate.setHours(0,0,0,0);
+
+  const visitsThisWeek = db.visits.filter((v) => {
+    const vDate = new Date(v.visitDate);
+    return vDate >= startOfWeekDate;
+  });
+
   const targetCallRate = 8;
-  const actualCallRate = db.visits.filter(v => {
-    // count visits in current week/month
-    return true;
-  }).length;
+  const actualCallRate = visitsThisWeek.length;
   const callRatePct = Math.min(Math.round((actualCallRate / targetCallRate) * 100), 100);
 
-  // Customer Coverage: count distinct visited doctors in last 30 days vs total target list size (Class A + B)
+  // Customer Coverage
   const totalTargetList = db.doctors.filter(d => d.classRating === 'A' || d.classRating === 'B').length;
   const visitedDoctorNames = new Set(db.visits.filter(v => v.clientType === 'Doctor').map(v => v.doctorName));
   const distinctVisitedCount = Array.from(visitedDoctorNames).length;
   const coveragePct = totalTargetList > 0 ? Math.min(Math.round((distinctVisitedCount / totalTargetList) * 100), 100) : 100;
 
-  // Route Compliance: visits where isUnplanned is false / total visits
-  const unplannedCount = db.visits.filter(v => v.isUnplanned).length;
-  const compliancePct = totalVisits > 0 ? Math.round(((totalVisits - unplannedCount) / totalVisits) * 100) : 100;
+  // =====================================================================================
+  // الالتزام الفعلي: مقارنة الزيارات الفعلية بالعيادات المحددة في خطة السير الأسبوعية (حل النقطة 11)
+  // =====================================================================================
+  let routeCompliancePct = 100;
+  const activeCycle = db.weeklyCycles[0];
+  if (activeCycle && visitsThisWeek.length > 0) {
+    let matchesCount = 0;
+    visitsThisWeek.forEach((v) => {
+      const dayName = new Date(v.visitDate).toLocaleDateString('en-US', { weekday: 'long' });
+      const planForDay = activeCycle.plans.find(p => p.day === dayName);
+      if (planForDay) {
+        const isScheduled = planForDay.morning.workplaces.some(w => w.toLowerCase() === v.workplaceName.toLowerCase()) ||
+                            planForDay.evening.workplaces.some(w => w.toLowerCase() === v.workplaceName.toLowerCase());
+        if (isScheduled) {
+          matchesCount++;
+        }
+      }
+    });
+    routeCompliancePct = Math.round((matchesCount / visitsThisWeek.length) * 100);
+  } else if (totalVisits > 0) {
+    // Fallback if no active cycle: non-unplanned visits percentage
+    const unplannedCount = db.visits.filter(v => v.isUnplanned).length;
+    routeCompliancePct = Math.round(((totalVisits - unplannedCount) / totalVisits) * 100);
+  }
 
-  // Neglected Class A
+  // Dynamic Class A Neglect check
   const neglectedClassADocs = db.doctors.filter(d => {
     if (d.classRating !== 'A') return false;
     const docVisits = db.visits.filter(v => v.doctorName === d.name);
     if (docVisits.length === 0) return true;
     const lastVisitDate = new Date([...docVisits].sort((a,b) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime())[0].visitDate);
-    // current time anchor: 2026-06-02
-    const diff = (new Date('2026-06-02').getTime() - lastVisitDate.getTime()) / (1000 * 60 * 60 * 24);
+    const diff = (new Date().getTime() - lastVisitDate.getTime()) / (1000 * 60 * 60 * 24);
     return diff > 14;
   });
 
@@ -138,6 +174,22 @@ export default function DashboardView({ lang }: DashboardViewProps) {
   const sortedProducts = Object.entries(productShares).sort((a, b) => b[1] - a[1]);
   const productTotalVal = Object.values(productShares).reduce((acc, curr) => acc + curr, 0);
 
+  // =====================================================================================
+  // تنبيهات المخزون التلقائية الذكية (حل النقطة 9)
+  // =====================================================================================
+  const stockWarnings: string[] = [];
+  db.invoices.forEach((inv) => {
+    inv.items.forEach((it) => {
+      // 1. Low stock under 10
+      if (it.currentQuantity > 0 && it.currentQuantity < 10) {
+        const msg = t.lowStockMsg.replace('[NAME]', it.sampleName).replace('QTY', String(it.currentQuantity));
+        if (!stockWarnings.includes(msg)) {
+          stockWarnings.push(msg);
+        }
+      }
+    });
+  });
+
   // Class productivity ratios (A, B, C count of visits)
   const classVisits = { A: 0, B: 0, C: 0 };
   db.visits.forEach((v) => {
@@ -149,18 +201,42 @@ export default function DashboardView({ lang }: DashboardViewProps) {
   });
   const totalClassVisits = classVisits.A + classVisits.B + classVisits.C;
 
-  // Monthly trend mock database
-  const monthlyData = [
-    { name: 'Jan', count: 12 },
-    { name: 'Feb', count: 18 },
-    { name: 'Mar', count: 24 },
-    { name: 'Apr', count: 29 },
-    { name: 'May', count: 35 },
-    { name: 'Jun', count: totalVisits }, // real-time link
+  // Representative Name
+  const repName = localStorage.getItem('medrep_representative_name') || (lang === 'ar' ? 'وليد فريد' : 'Waleed Fareed');
+
+  // Dynamic score and standings calculations
+  const calculatedScore = (totalVisits * 125) + (totalSamplesDistributed * 20) + (routeCompliancePct * 15);
+  
+  const regionalCompetitors = [
+    { name: lang === 'ar' ? 'أحمد سليمان (جدة)' : 'Ahmad Suleiman (Jeddah)', region: lang === 'ar' ? 'القطاع الغربي' : 'Western Region', score: 3850, compliance: 96, isUser: false },
+    { name: lang === 'ar' ? 'سارة مراد (الدمام)' : 'Sarah Mourad (Dammam)', region: lang === 'ar' ? 'القطاع الشرقي' : 'Eastern Region', score: 2420, compliance: 92, isUser: false },
+    { name: lang === 'ar' ? 'ياسر العتيبي (أبها)' : 'Yasser Al-Otaibi (Abha)', region: lang === 'ar' ? 'القطاع الجنوبي' : 'Southern Region', score: 1450, compliance: 85, isUser: false },
+    { name: lang === 'ar' ? 'ريما القحطاني (تبوك)' : 'Rima Al-Qahtani (Tabuk)', region: lang === 'ar' ? 'القطاع الشمالي' : 'Northern Region', score: 720, compliance: 78, isUser: false }
   ];
 
-  // Determine dynamic Representative Profile Name
-  const repName = localStorage.getItem('medrep_representative_name') || (lang === 'ar' ? 'وليد فريد' : 'Waleed Fareed');
+  const liveLeaderboard = [
+    ...regionalCompetitors,
+    { name: repName + (lang === 'ar' ? ' (أنت - الرياض)' : ' (You - Riyadh)'), region: lang === 'ar' ? 'القطاع الأوسط' : 'Central Region', score: calculatedScore, compliance: routeCompliancePct, isUser: true }
+  ].sort((a, b) => b.score - a.score);
+
+  const userRankIndex = liveLeaderboard.findIndex(c => c.isUser);
+  const userRank = userRankIndex + 1;
+
+  let targetingGrade = 'C';
+  if (calculatedScore >= 2500) targetingGrade = 'A+';
+  else if (calculatedScore >= 1500) targetingGrade = 'A';
+  else if (calculatedScore >= 850) targetingGrade = 'B';
+  else if (calculatedScore >= 350) targetingGrade = 'B-';
+
+  const gradingLabel = {
+    'A+': lang === 'ar' ? 'استثنائي (A+)' : 'Elite (A+)',
+    'A': lang === 'ar' ? 'ممتاز (A)' : 'Excellent (A)',
+    'B': lang === 'ar' ? 'جيد جداً (B)' : 'Very Good (B)',
+    'B-': lang === 'ar' ? 'مقبول (B-)' : 'Good (B-)',
+    'C': lang === 'ar' ? 'تحت التقييم (C)' : 'Under Evaluation (C)'
+  }[targetingGrade as 'A+' | 'A' | 'B' | 'B-' | 'C'] || (lang === 'ar' ? 'تحت التقييم (C)' : 'Under Evaluation (C)');
+
+  const dynamicStreak = Math.max(1, new Set(db.visits.map(v => v.visitDate.split('T')[0])).size);
 
   return (
     <div className="space-y-6 fade-in" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
@@ -192,7 +268,7 @@ export default function DashboardView({ lang }: DashboardViewProps) {
       {/* Main Counter Summaries */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-100 rounded-xl p-4 flex items-center gap-4 hover:border-slate-200 transition-colors">
-          <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-blue-600 shrink-0">
+          <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-blue-600 shrink-0 select-none">
             <Calendar className="w-6 h-6" />
           </div>
           <div>
@@ -202,7 +278,7 @@ export default function DashboardView({ lang }: DashboardViewProps) {
         </div>
 
         <div className="bg-white border border-slate-100 rounded-xl p-4 flex items-center gap-4 hover:border-slate-200 transition-colors">
-          <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-600 shrink-0">
+          <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-600 shrink-0 select-none">
             <Package className="w-6 h-6" />
           </div>
           <div>
@@ -212,7 +288,7 @@ export default function DashboardView({ lang }: DashboardViewProps) {
         </div>
 
         <div className="bg-white border border-slate-100 rounded-xl p-4 flex items-center gap-4 hover:border-slate-200 transition-colors">
-          <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-amber-600 shrink-0">
+          <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-amber-600 shrink-0 select-none">
             <Award className="w-6 h-6" />
           </div>
           <div>
@@ -222,7 +298,7 @@ export default function DashboardView({ lang }: DashboardViewProps) {
         </div>
 
         <div className="bg-white border border-slate-100 rounded-xl p-4 flex items-center gap-4 hover:border-slate-200 transition-colors">
-          <div className="p-3 bg-purple-50 border border-purple-100 rounded-lg text-purple-600 shrink-0">
+          <div className="p-3 bg-purple-50 border border-purple-100 rounded-lg text-purple-600 shrink-0 select-none">
             <Users className="w-6 h-6" />
           </div>
           <div>
@@ -241,7 +317,6 @@ export default function DashboardView({ lang }: DashboardViewProps) {
             {t.kpiCallRate}
           </h3>
           <div className="flex flex-col items-center justify-center pt-2 pb-4">
-            {/* Custom SVG Circular Progress */}
             <div className="relative w-32 h-32">
               <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
                 <circle cx="50" cy="50" r="40" stroke="#f1f5f9" strokeWidth="8" fill="transparent" />
@@ -269,7 +344,7 @@ export default function DashboardView({ lang }: DashboardViewProps) {
           </div>
         </div>
 
-        {/* Target Coverage Rate */}
+        {/* Target Customer Coverage Rate */}
         <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
           <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
             <Users className="w-4 h-4 text-slate-500" />
@@ -297,8 +372,8 @@ export default function DashboardView({ lang }: DashboardViewProps) {
               </div>
             </div>
             <div className="flex justify-between w-full text-xs text-slate-500 mt-6 border-t border-slate-50 pt-3">
-              <span>{t.actual}: <strong className="text-slate-800">{distinctVisitedCount} أطباء</strong></span>
-              <span>{t.target}: <strong className="text-slate-800">{totalTargetList} مستهدف</strong></span>
+              <span>{t.actual}: <strong className="text-slate-800">{distinctVisitedCount} {lang === 'ar' ? 'أطباء' : 'docs'}</strong></span>
+              <span>{t.target}: <strong className="text-slate-800">{totalTargetList} {lang === 'ar' ? 'مستهدف' : 'targets'}</strong></span>
             </div>
           </div>
         </div>
@@ -321,22 +396,36 @@ export default function DashboardView({ lang }: DashboardViewProps) {
                   strokeWidth="8" 
                   fill="transparent" 
                   strokeDasharray="251.2" 
-                  strokeDashoffset={251.2 - (251.2 * compliancePct) / 100}
+                  strokeDashoffset={251.2 - (251.2 * routeCompliancePct) / 100}
                   strokeLinecap="round"
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-2xl font-extrabold text-slate-800">{compliancePct}%</span>
-                <span className="text-[10px] text-slate-400 font-medium">{totalVisits - unplannedCount} / {totalVisits}</span>
+                <span className="text-2xl font-extrabold text-slate-800">{routeCompliancePct}%</span>
+                <span className="text-[10px] text-slate-400 font-medium">{t.actual}</span>
               </div>
             </div>
             <div className="flex justify-between w-full text-xs text-slate-500 mt-6 border-t border-slate-50 pt-3">
-              <span>{lang === 'ar' ? 'مخطط:' : 'Planned:'} <strong className="text-slate-800">{totalVisits - unplannedCount}</strong></span>
-              <span>{lang === 'ar' ? 'غير مخطط:' : 'Unplanned:'} <strong className="text-amber-600 font-bold">{unplannedCount}</strong></span>
+              <span>{lang === 'ar' ? 'معدل الالتزام بخط السير والـ GPS التلقائي الذكي' : 'Route alignment & automatic matching accuracy.'}</span>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Intelligent Stock Warnings & Expiration Block (حل النقطة 9) */}
+      {stockWarnings.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3">
+          <h4 className={`font-bold text-amber-900 text-sm flex items-center gap-2 ${lang === 'ar' ? 'flex-row' : 'flex-row-reverse'}`}>
+            <Package className="w-5 h-5 text-amber-600 shrink-0" />
+            {t.stockWarnings}
+          </h4>
+          <ul className="text-xs text-amber-800 space-y-1.5 list-disc list-inside">
+            {stockWarnings.map((warning, index) => (
+              <li key={index} className="font-semibold">{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Class Ratings and Focus share reports */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -443,7 +532,6 @@ export default function DashboardView({ lang }: DashboardViewProps) {
         </h3>
         <div className="space-y-2">
           <div className="text-xs text-slate-400">{t.monthlyTrend}:</div>
-          {/* Custom SVG Line or area graph to avoid massive Recharts library errors */}
           <div className="w-full overflow-hidden">
             <svg viewBox="0 0 500 130" className="w-full h-32 overflow-visible">
               <defs>
@@ -452,14 +540,10 @@ export default function DashboardView({ lang }: DashboardViewProps) {
                   <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
                 </linearGradient>
               </defs>
-              {/* Background grid lines */}
               <line x1="10" y1="10" x2="490" y2="10" stroke="#f1f5f9" strokeWidth="1" />
               <line x1="10" y1="50" x2="490" y2="50" stroke="#f1f5f9" strokeWidth="1" />
               <line x1="10" y1="90" x2="490" y2="90" stroke="#f1f5f9" strokeWidth="1" />
               
-              {/* Plot coordinates */}
-              {/* Jan: 10, Feb: 106, Mar: 202, Apr: 298, May: 394, Jun: 490 */}
-              {/* Y coordinates derived from count: 12->95, 18->85, 24->75, 29->65, 35->55, real-time-visit->calculated */}
               {(() => {
                 const junVal = totalVisits;
                 const points = [
@@ -476,11 +560,8 @@ export default function DashboardView({ lang }: DashboardViewProps) {
                 
                 return (
                   <>
-                    {/* Area fill */}
                     <path d={closedPathString} fill="url(#chartGradient)" />
-                    {/* Stroke line */}
                     <path d={pathString} fill="none" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                    {/* Points and Text labels */}
                     {points.map((p, idx) => (
                       <g key={idx}>
                         <circle cx={p.x} cy={p.y} r="4.5" fill="#3b82f6" stroke="#ffffff" strokeWidth="1.5" className="hover:scale-125 transition-transform" />
@@ -497,41 +578,36 @@ export default function DashboardView({ lang }: DashboardViewProps) {
       </div>
 
       {/* SFA KPIs Leaderboard & Motivation Scorecard */}
-      <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
-        <div className="border-b border-slate-50 pb-2.5">
+      <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-5">
+        <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
           <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
             <Award className="w-5 h-5 text-indigo-500" />
             {t.kpisLeaderboard}
           </h3>
+          <span className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-2.5 py-1 rounded-md font-bold transition-colors">
+            {lang === 'ar' ? 'القطاع الرياض المركزي' : 'Central Riyadh Sector'}
+          </span>
         </div>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl text-center space-y-1">
+        {/* Metric Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="bg-slate-50 border border-slate-100 p-5 rounded-xl text-center space-y-2">
             <div className="text-[10px] text-slate-400 font-bold uppercase">{t.leaderRank}</div>
-            <div className="text-sm font-extrabold text-slate-900 font-sans">{t.rankValue}</div>
-            <div className="text-[9px] text-indigo-500 font-semibold">{lang === 'ar' ? 'القطاع الأوسط (الرياض)' : 'Riyadh Central Sector'}</div>
+            <div className="text-base font-extrabold text-slate-900 font-sans">
+              {userRank === 1 ? (lang === 'ar' ? 'المركز الأول 🥇' : '1st Place 🥇') :
+               userRank === 2 ? (lang === 'ar' ? 'المركز الثاني 🥈' : '2nd Place 🥈') :
+               userRank === 3 ? (lang === 'ar' ? 'المركز الثالث 🥉' : '3rd Place 🥉') :
+               (lang === 'ar' ? `المركز ${userRank}` : `Rank #${userRank}`)}
+            </div>
+            <div className="text-[9px] text-indigo-500 font-semibold">{lang === 'ar' ? 'المنطقة الوسطى' : 'Central Territory'}</div>
           </div>
 
-          <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl text-center space-y-1">
+          <div className="bg-slate-50 border border-slate-100 p-5 rounded-xl text-center space-y-2">
             <div className="text-[10px] text-slate-400 font-bold uppercase">{t.leaderScore}</div>
-            <div className="text-sm font-extrabold text-slate-900 font-mono">
-              {(totalVisits * 125) + (totalSamplesDistributed * 20) + (compliancePct * 15)} PTS
+            <div className="text-base font-extrabold text-indigo-600 font-mono">
+              {calculatedScore} PTS
             </div>
-            <div className="text-[9px] text-slate-400 font-semibold">{lang === 'ar' ? 'محتسب حركياً' : 'Dynamically calculated'}</div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl text-center space-y-1">
-            <div className="text-[10px] text-slate-400 font-bold uppercase">{t.leaderStreak}</div>
-            <div className="text-sm font-extrabold text-orange-600 font-sans">
-              🔥 5 {lang === 'ar' ? 'أيام متواصلة' : 'Continuous Days'}
-            </div>
-            <div className="text-[9px] text-slate-400 font-semibold">{lang === 'ar' ? 'نسبة دقة تزامنية عالية' : 'Sync Precision Rate: 100%'}</div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl text-center space-y-1">
-            <div className="text-[10px] text-slate-400 font-bold uppercase">{t.leaderGrade}</div>
-            <div className="text-sm font-extrabold text-emerald-600 font-sans">{t.gradeDesc}</div>
-            <div className="text-[9px] text-emerald-500 font-bold">🎖️ {lang === 'ar' ? 'المندوب العقاري المثالي' : 'Elite Representative'}</div>
+            <div className="text-[9px] text-slate-400 font-semibold">{lang === 'ar' ? 'محتسب ديناميكياً' : 'Dynamically computed'}</div>
           </div>
         </div>
       </div>
@@ -571,7 +647,7 @@ export default function DashboardView({ lang }: DashboardViewProps) {
               <motion.div 
                 whileHover={{ scale: 1.01 }}
                 key={alarm.id} 
-                className="bg-white border-l-4 border-red-500 hover:border-red-600 text-slate-800 p-3.5 rounded-xl shadow-xs flex items-start gap-3 border border-slate-100 transition-all"
+                className="bg-white border-l-4 border-red-500 hover:border-red-600 text-slate-800 p-3.5 rounded-xl shadow-xs flex items-start gap-3 border border-slate-100 transition-all text-right"
               >
                 <div className="p-1.5 bg-red-100 text-red-700 rounded-lg shrink-0 mt-0.5">
                   <AlertTriangle className="w-4 h-4" />

@@ -201,7 +201,7 @@ Output your plan as a clean Markdown string in beautiful Arabic language. Mentio
 `;
 
     const response = await client.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-1.5-flash',
       contents: payloadPrompt,
       config: {
         systemInstruction: 'You are an SFA (Sales Force Automation) AI routing master who speaks Arabic fluently. Address the user respectfully.',
@@ -260,7 +260,7 @@ Output in beautiful Arabic formatted in clean Markdown.
 `;
 
     const response = await client.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-1.5-flash',
       contents: payloadPrompt,
       config: {
         systemInstruction: 'You are an SFA performance evaluation assistant. Provide objective, precise feedback in Arabic.',
@@ -281,6 +281,85 @@ Output in beautiful Arabic formatted in clean Markdown.
 
 // Start Express + Vite Dev middleware or serve static dist
 async function startServer() {
+  // sw.js endpoint for offline Service Worker
+  app.get('/sw.js', (req, res) => {
+    res.setHeader('Content-Type', 'application/javascript');
+    res.send(`
+      const CACHE_NAME = 'medrep-v10-cache';
+      const ASSETS = [
+        '/',
+        '/index.html',
+        '/src/main.tsx',
+        '/src/App.tsx',
+        '/src/index.css',
+        'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+        'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+      ];
+
+      self.addEventListener('install', (e) => {
+        e.waitUntil(
+          caches.open(CACHE_NAME).then((cache) => {
+            return cache.addAll(ASSETS).catch(() => cache.addAll(['/']));
+          }).then(() => self.skipWaiting())
+        );
+      });
+
+      self.addEventListener('activate', (e) => {
+        e.waitUntil(
+          caches.keys().then((keys) => {
+            return Promise.all(
+              keys.map((key) => {
+                if (key !== CACHE_NAME) {
+                  return caches.delete(key);
+                }
+              })
+            );
+          }).then(() => self.clients.claim())
+        );
+      });
+
+      self.addEventListener('fetch', (e) => {
+        if (e.request.method !== 'GET' || e.request.url.includes('/api/')) {
+          return;
+        }
+        e.respondWith(
+          fetch(e.request)
+            .then((response) => {
+              // Cache a clone of the response if it is valid
+              if (response && response.status === 200) {
+                const responseClone = response.clone();
+                caches.open(CACHE_NAME).then((cache) => {
+                  cache.put(e.request, responseClone);
+                });
+              }
+              return response;
+            })
+            .catch(() => caches.match(e.request))
+        );
+      });
+    `);
+  });
+
+  // manifest.json endpoint for PWA capability
+  app.get('/manifest.json', (req, res) => {
+    res.json({
+      "short_name": "MedRep",
+      "name": "Med Rep SFA Pro",
+      "icons": [
+        {
+          "src": "https://ai.google.dev/static/site-assets/images/share-ais-513315318.png",
+          "type": "image/png",
+          "sizes": "512x512"
+        }
+      ],
+      "start_url": "/",
+      "background_color": "#0f172a",
+      "theme_color": "#4f46e5",
+      "display": "standalone",
+      "orientation": "portrait"
+    });
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
