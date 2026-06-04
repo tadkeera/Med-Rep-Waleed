@@ -43,6 +43,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
   const [notes, setNotes] = useState('');
   
   // Geolocation states
+  const [isGpsEnabled, setIsGpsEnabled] = useState(true);
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [isFetchingGps, setIsFetchingGps] = useState(false);
@@ -162,6 +163,10 @@ export default function VisitsView({ lang }: VisitsViewProps) {
     setCheckInTime(new Date().toISOString());
   }, []);
 
+  useEffect(() => {
+    triggerGpsAcquisition();
+  }, [isGpsEnabled]);
+
   // Update contextual card on doctor selection
   useEffect(() => {
     if (doctorName.trim()) {
@@ -251,6 +256,13 @@ export default function VisitsView({ lang }: VisitsViewProps) {
   const triggerGpsAcquisition = () => {
     setIsFetchingGps(true);
     setGpsFallbackUsed(false);
+
+    if (!isGpsEnabled) {
+      setLatitude(null);
+      setLongitude(null);
+      setIsFetchingGps(false);
+      return;
+    }
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -411,9 +423,9 @@ export default function VisitsView({ lang }: VisitsViewProps) {
       }
     }
 
-    // Prepare visit coordinates
-    const finalLat = latitude || matchedWork?.latitude || 24.7136;
-    const finalLng = longitude || matchedWork?.longitude || 46.6753;
+    // Prepare visit coordinates. If GPS is OFF, force null/undefined without fallback
+    const finalLat = isGpsEnabled ? (latitude || matchedWork?.latitude || 24.7136) : undefined;
+    const finalLng = isGpsEnabled ? (longitude || matchedWork?.longitude || 46.6753) : undefined;
 
     addVisitLog({
       visitDate,
@@ -1017,6 +1029,34 @@ export default function VisitsView({ lang }: VisitsViewProps) {
       {/* 1. Log New Field Visit State Panel */}
       {mainTab === 'log' && (
         <>
+          {/* GPS Telemetry Controls */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-xl transition-colors ${isGpsEnabled ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-400'}`}>
+                <Navigation className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-800">
+                  {lang === 'ar' ? 'تتبع الموقع الجغرافي (GPS)' : 'Location Tracking (GPS)'}
+                </h4>
+                <p className="text-xs text-slate-500">
+                  {lang === 'ar' ? 'توثيق الإحداثيات الحية للزيارة الميدانية' : 'Attach live coordinates to audit visit'}
+                </p>
+              </div>
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => setIsGpsEnabled(!isGpsEnabled)}
+              dir="ltr"
+              className={`relative cursor-pointer flex items-center rounded-full p-1 transition-colors duration-300 w-12 h-7 focus:outline-none shrink-0 ${
+                isGpsEnabled ? 'bg-green-500 justify-end' : 'bg-slate-300 justify-start'
+              }`}
+            >
+              <span className="h-5 w-5 rounded-full bg-white shadow-sm transition-transform" />
+            </button>
+          </div>
+
           {/* Tabs list switch */}
           <div className="flex bg-slate-150 p-1 rounded-xl max-w-md w-full border border-slate-200">
             <button
@@ -1074,7 +1114,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                     <input
                       type="date"
                       required
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all font-mono"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-4 py-3 text-base min-h-[44px] outline-none transition-all font-mono"
                       value={visitDate}
                       onChange={(e) => setVisitDate(e.target.value)}
                     />
@@ -1087,7 +1127,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                         type="text"
                         required
                         placeholder={lang === 'ar' ? 'ابحث عن اسم الطبيب...' : 'Search doctor name...'}
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-4 py-3 text-base min-h-[44px] outline-none transition-all"
                         value={doctorName}
                         onChange={(e) => handleInputChange('doctor', e.target.value)}
                       />
@@ -1113,7 +1153,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                         type="text"
                         required
                         placeholder={lang === 'ar' ? 'ابحث عن اسم الصيدلية أو العميل...' : 'Pharmacy name...'}
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-4 py-3 text-base min-h-[44px] outline-none transition-all"
                         value={workplaceName}
                         onChange={(e) => handleInputChange('workplace', e.target.value)}
                       />
@@ -1142,7 +1182,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                         type="text"
                         required
                         placeholder={lang === 'ar' ? 'اسم المستشفى أو عيادة الطبيب...' : 'Hospital or clinic workplace...'}
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-4 py-3 text-base min-h-[44px] outline-none transition-all"
                         value={workplaceName}
                         onChange={(e) => handleInputChange('workplace', e.target.value)}
                       />
@@ -1248,7 +1288,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                             <input
                               type="text"
                               placeholder={lang === 'ar' ? 'اكتب اسم الصنف للتسهيل...' : 'Medicine name...'}
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-purple-500 font-medium"
+                              className="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-base min-h-[44px] outline-none focus:border-purple-500 font-medium"
                               value={s.sampleName}
                               onChange={(e) => handleSampleNameChange(idx, e.target.value)}
                               onFocus={() => {
@@ -1308,7 +1348,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                             <input
                               type="number"
                               min="0"
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-purple-500 font-mono"
+                              className="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-base min-h-[44px] outline-none focus:border-purple-500 font-mono"
                               value={s.qty}
                               onChange={(e) => handleQtyChange(idx, Math.max(0, Number(e.target.value)))}
                             />
@@ -1333,7 +1373,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                   <label className="text-xs font-semibold text-slate-600">{t.notes}</label>
                   <textarea
                     placeholder={lang === 'ar' ? 'تفاصيل المناقشة مع العميل أو الطبيب...' : 'Discussion detailing feedback...'}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm outline-none h-20 transition-all resize-none"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-4 py-3 text-base outline-none h-24 transition-all resize-none"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                   />
@@ -1392,82 +1432,6 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                   </div>
                 </div>
               )}
-
-              {/* List of active Visits */}
-              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                <h3 className="font-bold text-slate-900 text-sm border-b border-dash border-slate-50 pb-2">
-                  {t.visitsHistory}
-                </h3>
-
-                <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                  {[...db.visits].reverse().map((v) => {
-                    const inTime = new Date(v.checkInTime).getTime();
-                    const outTime = new Date(v.checkOutTime).getTime();
-                    const duration = Math.round((outTime - inTime) / 1000 / 60);
-                    
-                    return (
-                      <div key={v.id} className="border border-slate-100 rounded-xl p-3 bg-slate-50/50 hover:bg-slate-50 transition-all space-y-2 relative">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteVisit(v.id)}
-                          className="absolute top-2.5 left-2.5 text-slate-400 hover:text-red-500 p-1 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                          title={t.deleteBtn}
-                        >
-                          <Trash className="w-3.5 h-3.5" />
-                        </button>
-
-                        <div className="space-y-1.5 pr-2.5">
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                            <span className="bg-slate-200/60 text-slate-600 px-1.5 py-0.5 rounded-sm font-semibold">{v.clientType}</span>
-                            <span className="font-mono">{v.visitDate}</span>
-                            {v.isUnplanned && (
-                              <span className="bg-amber-100/50 text-amber-800 border border-amber-200/40 text-[9px] px-1 py-0.5 rounded-sm font-semibold">غير مخطط</span>
-                            )}
-                          </div>
-
-                          <div className="text-xs font-bold text-slate-800">
-                            {v.clientType === 'Doctor' ? v.doctorName : v.workplaceName}
-                          </div>
-
-                          {v.clientType === 'Doctor' && (
-                            <div className="text-[10px] text-slate-500 font-medium">
-                              {v.workplaceName} • <span className="bg-slate-100 px-1 py-0.5 rounded text-slate-600 font-semibold text-[9px]">Class {v.doctorClass}</span>
-                            </div>
-                          )}
-
-                          {/* Samples distributed details */}
-                          {v.samples.length > 0 && (
-                            <div className="space-y-1 border-t border-slate-100/60 pt-2">
-                              {v.samples.map((s, idx) => (
-                                <div key={idx} className="flex justify-between items-center text-[10px] font-mono text-slate-600">
-                                  <span className="font-sans truncate max-w-[120px]">{s.sampleName}</span>
-                                  <strong className="text-slate-900 font-bold">{s.quantityDistributed} وحدات</strong>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {v.notes && (
-                            <p className="text-[10px] text-slate-400 italic line-clamp-2 pt-1 border-t border-slate-100/40">
-                              "{v.notes}"
-                            </p>
-                          )}
-
-                          <div className="text-[8px] text-slate-400 text-left pt-1 font-mono">
-                            مدة الزيارة: {duration} دقيقة
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {db.visits.length === 0 && (
-                    <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                      {t.noVisits}
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
         </>

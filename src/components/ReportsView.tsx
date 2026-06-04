@@ -15,13 +15,14 @@ interface ReportsViewProps {
 
 export default function ReportsView({ lang }: ReportsViewProps) {
   const [db, setDb] = useState(getInitialState());
-  const [reportType, setReportType] = useState<'sample' | 'doctor'>('sample');
+  const [reportType, setReportType] = useState<'sample' | 'doctor' | 'visitslog'>('sample');
 
   // Input Filters
   const [dateFrom, setDateFrom] = useState('2026-05-01');
   const [dateTo, setDateTo] = useState('2026-06-30');
   const [selectedSample, setSelectedSample] = useState('');
   const [selectedDoctor, setSelectedDoctor] = useState('');
+  const [reportSearchQuery, setReportSearchQuery] = useState('');
 
   // AI Analysis states
   const [aiAnalysisText, setAiAnalysisText] = useState<string | null>(null);
@@ -124,6 +125,21 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       return isWithinDate && isDoc;
     })
     .sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime());
+
+  // 3. Visits Log data calculations
+  const filteredVisitsLog = db.visits.filter((v) => {
+    if (reportSearchQuery.trim()) {
+      const q = reportSearchQuery.toLowerCase().trim();
+      const matchName = 
+        (v.doctorName || '').toLowerCase().includes(q) || 
+        (v.workplaceName || '').toLowerCase().includes(q) ||
+        (v.doctorSpeciality || '').toLowerCase().includes(q);
+      if (!matchName) return false;
+    }
+    if (dateFrom && new Date(v.visitDate) < new Date(dateFrom)) return false;
+    if (dateTo && new Date(v.visitDate) > new Date(dateTo)) return false;
+    return true;
+  });
 
   // Aggregate items and quantities distributed to selected doctor
   const docProductShares: { [name: string]: number } = {};
@@ -499,10 +515,10 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       </div>
 
       {/* Tabs of Reports */}
-      <div className="flex bg-slate-100 p-1 rounded-xl max-w-sm w-full border border-slate-200">
+      <div className="flex bg-slate-100 p-1 rounded-xl w-full border border-slate-200">
         <button
           type="button"
-          className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+          className={`flex-1 text-center py-3 text-sm font-bold rounded-lg transition-all cursor-pointer ${
             reportType === 'sample' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
           }`}
           onClick={() => {
@@ -514,7 +530,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
         </button>
         <button
           type="button"
-          className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+          className={`flex-1 text-center py-3 text-sm font-bold rounded-lg transition-all cursor-pointer ${
             reportType === 'doctor' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
           }`}
           onClick={() => {
@@ -524,16 +540,28 @@ export default function ReportsView({ lang }: ReportsViewProps) {
         >
           {lang === 'ar' ? 'تقرير الطبيب' : 'Doctor Chrono'}
         </button>
+        <button
+          type="button"
+          className={`flex-1 text-center py-3 text-sm font-bold rounded-lg transition-all cursor-pointer ${
+            reportType === 'visitslog' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+          }`}
+          onClick={() => {
+            setReportType('visitslog');
+            setAiAnalysisText(null);
+          }}
+        >
+          {lang === 'ar' ? 'سجل الزيارات الموثق' : 'Audited Visits Ledger'}
+        </button>
       </div>
 
       {/* Filter panel */}
       <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="space-y-1.5">
-            <label className="text-[11px] font-bold text-slate-600">{t.dateFromLabel}</label>
+            <label className="text-xs font-bold text-slate-600 block mb-1">{t.dateFromLabel}</label>
             <input
               type="date"
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs outline-none font-mono font-medium"
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-mono font-medium focus:border-indigo-400 focus:bg-white transition-colors"
               value={dateFrom}
               onChange={(e) => {
                 setDateFrom(e.target.value);
@@ -543,10 +571,10 @@ export default function ReportsView({ lang }: ReportsViewProps) {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[11px] font-bold text-slate-600">{t.dateToLabel}</label>
+            <label className="text-xs font-bold text-slate-600 block mb-1">{t.dateToLabel}</label>
             <input
               type="date"
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs outline-none font-mono font-medium"
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-mono font-medium focus:border-indigo-400 focus:bg-white transition-colors"
               value={dateTo}
               onChange={(e) => {
                 setDateTo(e.target.value);
@@ -557,9 +585,9 @@ export default function ReportsView({ lang }: ReportsViewProps) {
 
           {reportType === 'sample' ? (
             <div className="space-y-1.5 md:col-span-2">
-              <label className="text-[11px] font-bold text-slate-600">{t.sampleLabel}</label>
+              <label className="text-xs font-bold text-slate-600 block mb-1">{t.sampleLabel}</label>
               <select
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs outline-none font-semibold text-slate-800"
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-semibold text-slate-800 focus:border-indigo-400 focus:bg-white transition-colors min-h-[44px]"
                 value={selectedSample}
                 onChange={(e) => setSelectedSample(e.target.value)}
               >
@@ -568,11 +596,11 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                 ))}
               </select>
             </div>
-          ) : (
+          ) : reportType === 'doctor' ? (
             <div className="space-y-1.5 md:col-span-2">
-              <label className="text-[11px] font-bold text-slate-600">{t.doctorLabel}</label>
+              <label className="text-xs font-bold text-slate-600 block mb-1">{t.doctorLabel}</label>
               <select
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs outline-none font-semibold text-slate-800"
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-semibold text-slate-800 focus:border-indigo-400 focus:bg-white transition-colors min-h-[44px]"
                 value={selectedDoctor}
                 onChange={(e) => {
                   setSelectedDoctor(e.target.value);
@@ -583,6 +611,19 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                   <option key={d.id} value={d.name}>{d.name}</option>
                 ))}
               </select>
+            </div>
+          ) : (
+            <div className="space-y-1.5 md:col-span-2">
+              <label className="text-xs font-bold text-slate-600 block mb-1">
+                {lang === 'ar' ? 'البحث باسم الطبيب أو المستشفى' : 'Search Physician or Workplace'}
+              </label>
+              <input
+                type="text"
+                placeholder={lang === 'ar' ? 'بحث...' : 'Search...'}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-medium text-slate-800 focus:border-indigo-400 focus:bg-white transition-colors min-h-[44px]"
+                value={reportSearchQuery}
+                onChange={(e) => setReportSearchQuery(e.target.value)}
+              />
             </div>
           )}
         </div>
@@ -644,7 +685,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
               </div>
             )}
           </motion.div>
-        ) : (
+        ) : reportType === 'doctor' ? (
           <motion.div 
             key="doctor-report"
             initial={{ opacity: 0, y: 5 }}
@@ -788,6 +829,88 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                   </motion.div>
                 )}
               </div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="visitslog-report"
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm p-6 space-y-4"
+          >
+            <div className="border-b border-slate-100 pb-3">
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                {lang === 'ar' ? 'سجل الزيارات الموثق والرقابي للـ FIFO والـ SFA' : 'Audited Visits Ledger (With FIFO Rollback)'}
+              </h4>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                {lang === 'ar' 
+                  ? 'عرض وقراءة سجل الزيارات الميدانية. للحذف والتعديل المرجو استخدام أدوات النظام.' 
+                  : 'View historical field logs and assigned FIFO stocks.'}
+              </p>
+            </div>
+
+            {/* Ledger Table Container */}
+            <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50">
+              <table className="w-full text-right border-collapse text-[11px] leading-tight">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold">
+                    <th className="p-3 text-right">{lang === 'ar' ? 'بيانات الزيارة والعميل' : 'Physician & Client Profile'}</th>
+                    <th className="p-3 text-center">{lang === 'ar' ? 'التاريخ والوقت' : 'Field Schedule'}</th>
+                    <th className="p-3 text-right">{lang === 'ar' ? 'العينات والكميات المصروفة (FIFO)' : 'Dispensed Samples'}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredVisitsLog.map((v) => (
+                      <tr key={v.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="p-3 max-w-[200px]">
+                          <div className="font-bold text-slate-900 text-xs text-right">
+                            {v.clientType === 'Doctor' ? v.doctorName : v.workplaceName}
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {v.clientType === 'Doctor' 
+                              ? `${v.workplaceName} • Class ${v.doctorClass || 'B'}` 
+                              : (lang === 'ar' ? 'عميل صيدلية طبيعية' : 'Clinical Pharmacy Customer')}
+                          </div>
+                          {v.notes && (
+                            <div className="text-[9px] text-slate-500 bg-slate-50/90 py-1 px-2 rounded mt-1 italic border-r border-purple-300 max-w-xs truncate">
+                              "{v.notes}"
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="p-3 text-center">
+                          <div className="font-mono text-slate-600 font-bold text-xs">{v.visitDate}</div>
+                        </td>
+
+                        <td className="p-3">
+                          {v.samples && v.samples.length > 0 ? (
+                            <div className="flex flex-col gap-2 max-w-[200px]">
+                              {v.samples.map((s, idx) => (
+                                <div key={idx} className="flex items-center justify-between gap-2 bg-purple-50/70 border border-purple-100/30 px-3 py-1.5 rounded-lg text-xs">
+                                  <span className="font-medium text-slate-700 truncate font-sans">{s.sampleName}</span>
+                                  <span className="bg-purple-100 text-purple-800 font-extrabold px-1.5 py-0.5 rounded font-mono text-sm leading-none">
+                                    {s.quantityDistributed}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 italic text-[10px]">{lang === 'ar' ? 'بدون عينات صرف' : 'Zero distribution'}</span>
+                          )}
+                        </td>
+                      </tr>
+                  ))}
+
+                  {filteredVisitsLog.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-12 text-center text-slate-400 font-medium bg-slate-50/30">
+                        {lang === 'ar' ? 'لا توجد أي سجلات زيارات مطابقة للتصفية حالياً.' : 'No matching visit logs found.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </motion.div>
         )}
