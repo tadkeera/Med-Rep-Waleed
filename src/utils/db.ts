@@ -110,6 +110,123 @@ export function addInvoice(invoice: Omit<Invoice, 'id'>): Invoice {
 }
 
 /**
+ * Standardizes medicine sample names from the old legacy systems to match the exact spelling
+ * of the new official system.
+ */
+export function standardizeSampleName(name: string): string {
+  if (!name) return '';
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+
+  // Normalize Alefs, Yea's, and Tehs for highly accurate Arabic string matching
+  const norm = lower
+    .replace(/[أإآ]/g, 'ا') // Normalize alef to plain l
+    .replace(/ة/g, 'ه')     // Normalize teh marbuta to heh
+    .replace(/ى/g, 'ي');    // Normalize alef maksura to yeh
+
+  // 1. ميلاتونين اقراص / أقراص ⬅️ ميلاتونين كبسول
+  if (norm.includes('ميلاتونين') || norm.includes('ملاتونين') || norm.includes('melatonin')) {
+    return 'ميلاتونين كبسول';
+  }
+
+  // 2. انرجكس تو جو ⬅️ انرجكس تو جو امبول
+  if (norm.includes('انرجكس تو جو') || norm.includes('انرجكس توجو') || norm.includes('انرجيكس تو جو') || norm.includes('energex to go')) {
+    return 'انرجكس تو جو امبول';
+  }
+
+  // 3. ملتي ادلت اقراص ⬅️ ملتي فيتامين البالغين
+  if (norm.includes('ملتي ادلت') || norm.includes('ادلت') || norm.includes('adult') || norm.includes('البالغين') || (norm.includes('ملتي') && norm.includes('فيتامين'))) {
+    return 'ملتي فيتامين البالغين';
+  }
+
+  // 4. فمنكس كالسيوم / فيمنكس كالسيوم ⬅️ فيمنكس كاليسوم
+  if (norm.includes('كالسيوم') || norm.includes('كاليسوم') || norm.includes('calcium')) {
+    return 'فيمنكس كاليسوم';
+  }
+
+  // 5. جينكو بيلوا / جينكو بيلوبا ⬅️ جينكو بيلوبا كبسول
+  if (norm.includes('جينكو') || norm.includes('ginkgo') || norm.includes('جينكو بيلوا') || norm.includes('جينكو بيلوبا')) {
+    return 'جينكو بيلوبا كبسول';
+  }
+
+  // 6. سوبر انرجكس ⬅️ سوبر انرجكس كبسول
+  if (norm.includes('سوبر انرجكس') || norm.includes('سوبر انرجيكس') || norm.includes('سوبرانرجكس') || norm.includes('super energex')) {
+    return 'سوبر انرجكس كبسول';
+  }
+
+  // 7. جلوكزامين MSM ⬅️ جلوكوزامين ام اس ام
+  if (norm.includes('جلوكزامين') || norm.includes('جلوكوزامين') || norm.includes('glucosamine') || norm.includes('msm')) {
+    return 'جلوكوزامين ام اس ام';
+  }
+
+  // 8. كولاجين ⬅️ كولاجين (90) كبسول
+  if (norm.includes('كولاجين') || norm.includes('collagen')) {
+    return 'كولاجين (90) كبسول';
+  }
+
+  // 9. جوجوينت شراب ⬅️ جوجوينت شراب (not 10000)
+  if (norm.includes('جوجوينت') || norm.includes('gojoint')) {
+    return 'جوجوينت شراب';
+  }
+
+  // 10. كرانبري 10000 / فمنكس كرانبري 10000 ⬅️ فيمنكس كرانبيري 10000
+  if (norm.includes('كرانبري') || norm.includes('كرانبيري') || norm.includes('cranberry')) {
+    return 'فيمنكس كرانبيري 10000';
+  }
+
+  // Other system samples
+  if (norm.includes('فيبر بلس') || norm.includes('فايبر بلس') || norm.includes('fiber plus')) {
+    return 'فيبر بلس كبسول';
+  }
+  if (norm.includes('ديجست 365') || norm.includes('ديجست') || norm.includes('digest')) {
+    return 'ديجست 365 كبسول';
+  }
+  if (norm.includes('ارثري') || norm.includes('أرثري') || norm.includes('ارثري فلكس') || norm.includes('arthri')) {
+    return 'ارثري فلكس كريم';
+  }
+  if (norm.includes('نيوفلكس') || norm.includes('newflex')) {
+    return 'نيوفلكس جوينت';
+  }
+  if (norm.includes('ريلاكسين داي') || norm.includes('relaxin day')) {
+    return 'ريلاكسين داي';
+  }
+  if (norm.includes('ريلاكسين نايت') || norm.includes('relaxin night')) {
+    return 'ريلاكسين نايت';
+  }
+  if (norm.includes('ليوتن') || norm.includes('lutein')) {
+    return 'ليوتن كبسول';
+  }
+
+  // Direct exact mappings dictionary fallback
+  const exactMappings: { [key: string]: string } = {
+    'جوجوينت شراب': 'جوجوينت شراب',
+    'كرانبري 10000': 'فيمنكس كرانبيري 10000',
+    'فمنكس كرانبري 10000': 'فيمنكس كرانبيري 10000',
+    'ميلاتونين اقراص': 'ميلاتونين كبسول',
+    'ميلاتونين أقراص': 'ميلاتونين كبسول',
+    'انرجكس تو جو': 'انرجكس تو جو امبول',
+    'ملتي ادلت اقراص': 'ملتي فيتامين البالغين',
+    'فمنكس كالسيوم': 'فيمنكس كاليسوم',
+    'فيمنكس كالسيوم': 'فيمنكس كاليسوم',
+    'كولاجين': 'كولاجين (90) كبسول',
+    'كولاجين (90) كبسول': 'كولاجين (90) كبسول',
+    'ديجست 365 كبسول': 'ديجست 365 كبسول',
+    'ارثري فلكس كريم': 'ارثري فلكس كريم',
+    'اوميجا 3 كبسول': 'جلوكوزامين ام اس ام',
+    'جلوكزامين msm': 'جلوكوزامين ام اس ام',
+  };
+
+  if (exactMappings[trimmed]) {
+    return exactMappings[trimmed];
+  }
+  if (exactMappings[lower]) {
+    return exactMappings[lower];
+  }
+
+  return trimmed;
+}
+
+/**
  * Autocomplete matching function supporting minimum typing check
  */
 export function searchAutocomplete(type: 'sample' | 'doctor' | 'workplace', query: string): string[] {
@@ -139,7 +256,7 @@ export function searchAutocomplete(type: 'sample' | 'doctor' | 'workplace', quer
  */
 export function registerNewEntity(type: 'doctor' | 'workplace', name: string, extra?: any): any {
   const state = getInitialState();
-  const id = `${type === 'doctor' ? 'doc' : 'work'}-${Date.now()}`;
+  const id = `${type === 'doctor' ? 'doc' : 'work'}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
 
   if (type === 'doctor') {
     const newDoc: Doctor = {
@@ -266,7 +383,7 @@ export function deductFifoStock(sampleName: string, quantity: number, visitDate?
  */
 export function addVisitLog(visit: Omit<VisitLog, 'id'>): VisitLog {
   const state = getInitialState();
-  const id = `visit-${Date.now()}`;
+  const id = `visit-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
 
   // Process FIFO stock deductions
   const processedSamples: VisitSample[] = visit.samples.map((sample) => {
@@ -672,6 +789,277 @@ export function updateVisitSampleStrictFIFO(
 }
 
 /**
+ * Atomic Full Visit Editor: Rollback all old sample stocks, update attributes (workplaceName, doctorClass rating, notes),
+ * and re-calculate FIFO deductions for all requested sample allocations dynamically.
+ */
+export function updateFullVisitLog(
+  visitId: string,
+  updatedData: {
+    workplaceName?: string;
+    doctorClass?: 'A' | 'B' | 'C';
+    samples: { sampleName: string; quantityDistributed: number }[];
+    notes?: string;
+  }
+): void {
+  const state = getInitialState();
+  const visitIndex = state.visits.findIndex((v) => v.id === visitId);
+  if (visitIndex === -1) {
+    throw new Error('الزيارة غير موجودة في سجلات النظام.');
+  }
+
+  const visit = state.visits[visitIndex];
+
+  // 1. ROLLBACK: Return all previously deducted visit samples back to invoices stock
+  visit.samples.forEach((oldSample) => {
+    oldSample.deductions.forEach((ded) => {
+      state.invoices.forEach((inv, pIdx) => {
+        inv.items.forEach((it, iIdx) => {
+          if (it.id === ded.invoiceItemId) {
+            state.invoices[pIdx].items[iIdx].currentQuantity += ded.quantityDeducted;
+          }
+        });
+      });
+    });
+  });
+
+  // Temporarily preserve this state to allow available stock levels lookup to see the rolled back balance
+  saveState(state);
+
+  // 2. RE-VALIDATE: Inspect stock availability for every single sample requested in the update
+  const visitDate = visit.visitDate;
+  for (const sItem of updatedData.samples) {
+    if (sItem.quantityDistributed <= 0) continue;
+    const avail = getSampleStockBalanceForDate(sItem.sampleName, visitDate);
+    if (sItem.quantityDistributed > avail) {
+      throw new Error(
+        `المخزون المتوفر للصنف "${sItem.sampleName}" حتى تاريخ ${visitDate} هو ${avail} علبة، وهو غير كاف لتغطية الكمية المعدلة المطلوبة (${sItem.quantityDistributed} علبة).`
+      );
+    }
+  }
+
+  // 3. RE-ALLOCATE: Apply strict chronological FIFO deductions for each updated sample
+  const newSamplesWithDeductions: VisitSample[] = [];
+  for (const sItem of updatedData.samples) {
+    let deductions: { invoiceItemId: string; quantityDeducted: number }[] = [];
+    if (sItem.quantityDistributed > 0) {
+      deductions = deductFifoStock(sItem.sampleName, sItem.quantityDistributed, visitDate);
+    }
+    newSamplesWithDeductions.push({
+      sampleName: sItem.sampleName,
+      quantityDistributed: sItem.quantityDistributed,
+      deductions,
+    });
+  }
+
+  // 4. PERSIST FINAL ATTRIBUTES: Reload final state, copy updated data and save
+  const finalState = getInitialState();
+  const finalVisit = finalState.visits.find((v) => v.id === visitId);
+  if (!finalVisit) {
+    throw new Error('فشل استرجاع الزيارة للتحديث النهائي');
+  }
+
+  if (updatedData.workplaceName) {
+    const wpTrimmed = updatedData.workplaceName.trim();
+    finalVisit.workplaceName = wpTrimmed;
+
+    // Check if workplace exists or create a placeholder
+    let matchedWp = finalState.workplaces.find(
+      (w) => w.name.trim().toLowerCase() === wpTrimmed.toLowerCase()
+    );
+    if (!matchedWp) {
+      matchedWp = {
+        id: `work-mig-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        name: wpTrimmed,
+        latitude: null,
+        longitude: null,
+      };
+      finalState.workplaces.push(matchedWp);
+    }
+    finalVisit.workplaceLatitude = matchedWp.latitude ?? undefined;
+    finalVisit.workplaceLongitude = matchedWp.longitude ?? undefined;
+  }
+
+  if (updatedData.doctorClass && finalVisit.doctorName) {
+    finalVisit.doctorClass = updatedData.doctorClass;
+    const docName = finalVisit.doctorName.trim();
+    const docIndex = finalState.doctors.findIndex(
+      (d) => d.name.trim().toLowerCase() === docName.toLowerCase()
+    );
+    if (docIndex !== -1) {
+      finalState.doctors[docIndex].classRating = updatedData.doctorClass;
+    }
+  }
+
+  if (updatedData.notes !== undefined) {
+    finalVisit.notes = updatedData.notes;
+  }
+
+  finalVisit.samples = newSamplesWithDeductions;
+  saveState(finalState);
+}
+
+/**
+ * Recalculates and processes FIFO deductions for all visits in chronological sequence.
+ * It resets all invoice current quantities and rebuilds all visit deductions from scratch.
+ */
+export function recomputeAllFifoDeductions(): {
+  success: boolean;
+  processedVisitsCount: number;
+  totalDeductionsCount: number;
+  insufficientStockAlarms: string[];
+} {
+  const state = getInitialState();
+  const alarms: string[] = [];
+
+  // 1. Reset all invoice items to initial quantities
+  state.invoices.forEach((inv) => {
+    inv.items.forEach((item) => {
+      item.currentQuantity = item.initialQuantity;
+    });
+  });
+
+  // Save to let local reads inside deductFifoStock run on clean stock
+  saveState(state);
+
+  // 2. Sort all visits chronologically
+  const sortedVisits = [...state.visits].sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime());
+
+  let totalDeductions = 0;
+
+  // 3. Sequential FIFO deductions
+  for (let i = 0; i < sortedVisits.length; i++) {
+    const visit = sortedVisits[i];
+    const dateStr = visit.visitDate;
+
+    // We will call the database-saving deductFifoStock, which will automatically deduct from invoices
+    visit.samples = visit.samples.map((sample) => {
+      const requestedQty = sample.quantityDistributed;
+      if (requestedQty <= 0) {
+        return {
+          sampleName: sample.sampleName,
+          quantityDistributed: requestedQty,
+          deductions: [],
+        };
+      }
+
+      // Check available stock up to this date
+      const available = getSampleStockBalanceForDate(sample.sampleName, dateStr);
+      if (requestedQty > available) {
+        alarms.push(
+          `التاريخ: ${dateStr} - الطبيب: ${visit.doctorName || 'عميل'}: عينة "${sample.sampleName}" المطلوب: ${requestedQty}، المتوفر: ${available}`
+        );
+      }
+
+      const deductions = deductFifoStock(sample.sampleName, requestedQty, dateStr);
+      totalDeductions += deductions.reduce((acc, d) => acc + d.quantityDeducted, 0);
+
+      return {
+        sampleName: sample.sampleName,
+        quantityDistributed: requestedQty,
+        deductions,
+      };
+    });
+
+    // Now find this visit in the actual state and update its samples
+    const stateToSave = getInitialState();
+    const vIdx = stateToSave.visits.findIndex((v) => v.id === visit.id);
+    if (vIdx !== -1) {
+      stateToSave.visits[vIdx].samples = visit.samples;
+      saveState(stateToSave);
+    }
+  }
+
+  return {
+    success: true,
+    processedVisitsCount: sortedVisits.length,
+    totalDeductionsCount: totalDeductions,
+    insufficientStockAlarms: alarms,
+  };
+}
+
+/**
+ * Deletes all imported/migrated historical visits and resets stock allocations
+ */
+export function wipeAllMigratedVisitsAndRestoreStock(): { deletedCount: number } {
+  const state = getInitialState();
+  const originalCount = state.visits.length;
+
+  // Extremely robust filter out any visits that are historically imported or matching month prefixes
+  state.visits = state.visits.filter((v) => {
+    if (!v) return false;
+    const dateStr = typeof v.visitDate === 'string' ? v.visitDate.trim() : '';
+    const notesStr = typeof v.notes === 'string' ? v.notes : '';
+
+    const isImported = dateStr.startsWith('2026-01') ||
+                       dateStr.startsWith('2026-02') ||
+                       dateStr.startsWith('2026-03') ||
+                       dateStr.startsWith('2026-04') ||
+                       dateStr.includes('2026/01') ||
+                       dateStr.includes('2026/02') ||
+                       dateStr.includes('2026/03') ||
+                       dateStr.includes('2026/04') ||
+                       notesStr.includes('مرحلة') ||
+                       notesStr.includes('مرحّلة') ||
+                       notesStr.includes('القديم') ||
+                       notesStr.includes('تلقائياً') ||
+                       notesStr.includes('MediaFire') ||
+                       notesStr.includes('mediafire') ||
+                       notesStr.includes('يناير') ||
+                       notesStr.includes('فبراير') ||
+                       notesStr.includes('مارس') ||
+                       notesStr.includes('ابريل') ||
+                       notesStr.includes('إبريل') ||
+                       notesStr.includes('تمهيدية') ||
+                       notesStr.includes('ترويجية') ||
+                       notesStr.includes('متابعة');
+    return !isImported;
+  });
+
+  const deletedCount = originalCount - state.visits.length;
+
+  // Reset all invoice current quantities back to initialQuantity first
+  state.invoices.forEach((inv) => {
+    inv.items.forEach((item) => {
+      item.currentQuantity = item.initialQuantity;
+    });
+  });
+
+  saveState(state);
+
+  // Recompute FIFO deductions for whatever visits are left (the non-imported ones, if any)
+  if (state.visits.length > 0) {
+    recomputeAllFifoDeductions();
+  }
+
+  return { deletedCount };
+}
+
+/**
+ * Fully wipes all visits, doctors, workplaces, weekly plans and restores all invoice stock quantities back to initial values
+ */
+export function wipeAllDataComplete(): { deletedVisitsCount: number; deletedDoctorsCount: number } {
+  const state = getInitialState();
+  const deletedVisitsCount = state.visits.length;
+  const deletedDoctorsCount = state.doctors.length;
+
+  // Clear data
+  state.visits = [];
+  state.doctors = [];
+  state.workplaces = [];
+  state.weeklyCycles = [];
+
+  // Reset stock to equal original invoice entries exactly
+  state.invoices.forEach((inv) => {
+    inv.items.forEach((item) => {
+      item.currentQuantity = item.initialQuantity;
+    });
+  });
+
+  saveState(state);
+  return { deletedVisitsCount, deletedDoctorsCount };
+}
+
+/**
  * Migration Processor for legacy JSON doctor imports and historical visits with retroactive FIFO
  */
 export function migrateDoctorsFromLegacyJson(jsonList: any[]): void {
@@ -679,7 +1067,7 @@ export function migrateDoctorsFromLegacyJson(jsonList: any[]): void {
   
   jsonList.forEach((doc) => {
     const workplaceName = (doc.workplace_name || doc.workplaceName || 'مكان عمل غير محدد').trim();
-    const doctorName = (doc.doctor_name || doc.doctorName || '').trim();
+    const doctorName = (doc.doctor_name || doc.doctorName || doc.name || '').trim();
     if (!doctorName) return;
 
     // Insert workplace if missing
@@ -704,7 +1092,7 @@ export function migrateDoctorsFromLegacyJson(jsonList: any[]): void {
       matchedDoc = {
         id: `doc-mig-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         name: doctorName,
-        speciality: doc.speciality || 'طب عام',
+        speciality: doc.speciality || doc.specialty || 'طب عام',
         classRating: doc.class_rating || doc.classRating || 'C',
       };
       state.doctors.push(matchedDoc);
@@ -717,7 +1105,9 @@ export function migrateDoctorsFromLegacyJson(jsonList: any[]): void {
 export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): { successCount: number; errors: string[] } {
   // Sort visits chronologically, as retroactive FIFO depends on oldest-first visiting path
   const sorted = [...parsedHtmlVisits].sort((a, b) => {
-    return new Date(a.visit_date).getTime() - new Date(b.visit_date).getTime();
+    const dateA = a.visit_date || a.date || '';
+    const dateB = b.visit_date || b.date || '';
+    return new Date(dateA).getTime() - new Date(dateB).getTime();
   });
 
   let successCount = 0;
@@ -725,14 +1115,15 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
 
   for (const item of sorted) {
     try {
-      const visitDateStr = item.visit_date;
-      const doctorName = (item.doctor_name || '').trim();
-      const sampleName = (item.sample_name || '').trim();
-      const qty = Number(item.quantity_distributed) || 0;
-      const workplaceName = (item.workplace_name || 'مكان عمل غير محدد').trim();
+      const visitDateStr = item.visit_date || item.date;
+      const doctorName = (item.doctor_name || item.doctor || '').trim();
+      const workplaceName = (item.workplace_name || item.workplace || 'مكان عمل غير محدد').trim();
 
-      if (!doctorName || !sampleName) {
-        throw new Error('اسم الطبيب أو العينة مفقود.');
+      if (!visitDateStr) {
+        throw new Error('تاريخ الزيارة مفقود.');
+      }
+      if (!doctorName) {
+        throw new Error('اسم الطبيب مفقود.');
       }
 
       const state = getInitialState();
@@ -744,7 +1135,8 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
         // Register doc and workplace implicitly
         migrateDoctorsFromLegacyJson([{
           doctor_name: doctorName,
-          workplace_name: workplaceName
+          workplace_name: workplaceName,
+          speciality: item.specialty || item.speciality
         }]);
         const reloadedState = getInitialState();
         matchedDoc = reloadedState.doctors.find(
@@ -757,6 +1149,26 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
       const matchedWp = finalState.workplaces.find(
         (w) => w.name.trim().toLowerCase() === workplaceName.toLowerCase()
       );
+
+      // Support both nested samples (items array) or single sample top-level keys
+      const sampleItems: VisitSample[] = [];
+      if (item.items && Array.isArray(item.items)) {
+        for (const subItem of item.items) {
+          const rawName = (subItem.name || subItem.sample_name || '').trim();
+          const sName = standardizeSampleName(rawName);
+          const sQty = Number(subItem.quantity || subItem.quantity_distributed) || 0;
+          if (sName) {
+            sampleItems.push({ sampleName: sName, quantityDistributed: sQty, deductions: [] });
+          }
+        }
+      } else {
+        const rawName = (item.sample_name || '').trim();
+        const sampleName = standardizeSampleName(rawName);
+        const qty = Number(item.quantity_distributed) || 0;
+        if (sampleName) {
+          sampleItems.push({ sampleName, quantityDistributed: qty, deductions: [] });
+        }
+      }
 
       // Construct visit payload
       const visitPayload: Omit<VisitLog, 'id'> = {
@@ -772,19 +1184,17 @@ export function migrateHistoricalVisitsAndDeductStock(parsedHtmlVisits: any[]): 
         workplaceLongitude: matchedWp ? matchedWp.longitude : null,
         checkInTime: `${visitDateStr}T09:00:00Z`,
         checkOutTime: `${visitDateStr}T09:12:00Z`,
-        samples: [{
-          sampleName,
-          quantityDistributed: qty,
-          deductions: [],
-        }],
+        samples: sampleItems,
         notes: item.notes || 'زيارة مرحّلة تلقائياً من النظام القديم',
         isUnplanned: false,
       };
 
       // Deduct stock before adding visit log to test stock level
-      const availStock = getSampleStockBalanceForDate(sampleName, visitDateStr);
-      if (qty > availStock) {
-        throw new Error(`المخزون المتوفر للصنف "${sampleName}" حتى تاريخ ${visitDateStr} هو ${availStock} علبة، وهو غير كاف لتغطية الكمية الموزعة (${qty} علبة).`);
+      for (const sItem of sampleItems) {
+        const availStock = getSampleStockBalanceForDate(sItem.sampleName, visitDateStr);
+        if (sItem.quantityDistributed > availStock) {
+          throw new Error(`المخزون المتوفر للصنف "${sItem.sampleName}" حتى تاريخ ${visitDateStr} هو ${availStock} علبة، وهو غير كاف لتغطية الكمية الموزعة (${sItem.quantityDistributed} علبة).`);
+        }
       }
 
       // Add actual visit log (which performs chronological FIFO details internally)

@@ -16,7 +16,12 @@ import {
   calculateDistance,
   updateVisitSampleStrictFIFO,
   migrateDoctorsFromLegacyJson,
-  migrateHistoricalVisitsAndDeductStock
+  migrateHistoricalVisitsAndDeductStock,
+  updateFullVisitLog,
+  recomputeAllFifoDeductions,
+  standardizeSampleName,
+  wipeAllMigratedVisitsAndRestoreStock,
+  wipeAllDataComplete
 } from '../utils/db';
 import { VisitLog, VisitSample, Doctor, Workplace } from '../types';
 import { Calendar, Users, MapPin, Package, AlertCircle, Plus, Trash, Check, Compass, Sparkles, Navigation, Edit3, Search, Database, Upload, ArrowLeftRight, Trash2, ArrowUpDown, Lock, Unlock, FileText, CheckCircle2, Loader2 } from 'lucide-react';
@@ -83,6 +88,27 @@ export default function VisitsView({ lang }: VisitsViewProps) {
   const [editingNewQtyValue, setEditingNewQtyValue] = useState('');
   const [editingVisitDate, setEditingVisitDate] = useState('');
   const [editErrorMsg, setEditErrorMsg] = useState<string | null>(null);
+
+  // Full Visit Popup Modal Editor States
+  const [isFullEditModalOpen, setIsFullEditModalOpen] = useState(false);
+  const [fullEditVisitId, setFullEditVisitId] = useState<string | null>(null);
+  const [fullEditWorkplace, setFullEditWorkplace] = useState('');
+  const [fullEditDocClass, setFullEditDocClass] = useState<'A' | 'B' | 'C'>('C');
+  const [fullEditNotes, setFullEditNotes] = useState('');
+  const [fullEditSamples, setFullEditSamples] = useState<{ sampleName: string; quantityDistributed: number }[]>([]);
+  const [fullEditError, setFullEditError] = useState<string | null>(null);
+  const [fullEditNewSampleName, setFullEditNewSampleName] = useState('');
+  const [fullEditNewSampleQty, setFullEditNewSampleQty] = useState('1');
+  const [fullEditSearchFocused, setFullEditSearchFocused] = useState(false);
+  const [fullEditAutocompleteResults, setFullEditAutocompleteResults] = useState<string[]>([]);
+
+  // Retroactive FIFO recalculation states
+  const [recalcSummary, setRecalcSummary] = useState<{
+    processedVisitsCount: number;
+    totalDeductionsCount: number;
+    insufficientStockAlarms: string[];
+  } | null>(null);
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
   // Legacy Migration Processor States
   const [legacyJsonInput, setLegacyJsonInput] = useState('');
@@ -323,10 +349,11 @@ export default function VisitsView({ lang }: VisitsViewProps) {
     const matchedDoc = db.doctors.find(d => d.name.trim().toLowerCase() === doctorName.trim().toLowerCase());
     const matchedWork = db.workplaces.find(w => w.name.trim().toLowerCase() === workplaceName.trim().toLowerCase());
 
-    // Validate each sample item for date-bounded FIFO capacity
+    // Standardize and Validate each sample item for date-bounded FIFO capacity
     for (const s of samples) {
-      const name = s.sampleName.trim();
-      if (!name) continue;
+      const rawName = s.sampleName.trim();
+      if (!rawName) continue;
+      const name = standardizeSampleName(rawName);
 
       // RULE: ZERO-DEDUCTION PASS-THROUGH bypasses validation
       if (s.qty === 0) continue;
@@ -345,7 +372,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
     const finalSamples = samples
       .filter(s => s.sampleName.trim())
       .map(s => ({
-        sampleName: s.sampleName.trim(),
+        sampleName: standardizeSampleName(s.sampleName.trim()),
         quantityDistributed: s.qty,
         deductions: [], // populated automatically inside DB utility deductFifoStock
       }));
@@ -452,6 +479,154 @@ export default function VisitsView({ lang }: VisitsViewProps) {
     }
   };
 
+  // Full-scale Dynamic Visit Log Editor handlers
+  const handleOpenFullEditModal = (v: VisitLog) => {
+    setFullEditVisitId(v.id);
+    setFullEditWorkplace(v.workplaceName || '');
+    setFullEditDocClass(v.doctorClass || 'C');
+    setFullEditNotes(v.notes || '');
+    setFullEditSamples(v.samples.map(s => ({
+      sampleName: s.sampleName,
+      quantityDistributed: s.quantityDistributed
+    })));
+    setFullEditError(null);
+    setFullEditNewSampleName('');
+    setFullEditNewSampleQty('1');
+    setFullEditSearchFocused(false);
+    setFullEditAutocompleteResults([]);
+    setIsFullEditModalOpen(true);
+  };
+
+  const handleFullEditAddSample = () => {
+    if (!fullEditNewSampleName.trim()) {
+      setFullEditError(lang === 'ar' ? 'يرجى إدخال اسم عينة دواء صحيحة' : 'Please specify a proper medicine name');
+      return;
+    }
+    const qtyNum = Number(fullEditNewSampleQty);
+    if (isNaN(qtyNum) || qtyNum < 0) {
+      setFullEditError(lang === 'ar' ? 'الكمية يجب أن تكون رقماً أكبر من أو يساوي الصفر' : 'Quantity must be positive or zero');
+      return;
+    }
+
+    const nameNormalized = fullEditNewSampleName.trim();
+    const existingIdx = fullEditSamples.findIndex(s => s.sampleName.toLowerCase() === nameNormalized.toLowerCase());
+    
+    if (existingIdx !== -1) {
+      // update quantity of existing row
+      setFullEditSamples(prev => prev.map((s, idx) => idx === existingIdx ? { ...s, quantityDistributed: s.quantityDistributed + qtyNum } : s));
+    } else {
+      // add new sample item row
+      setFullEditSamples(prev => [...prev, { sampleName: nameNormalized, quantityDistributed: qtyNum }]);
+    }
+
+    setFullEditNewSampleName('');
+    setFullEditNewSampleQty('1');
+    setFullEditError(null);
+  };
+
+  const handleFullEditRemoveSample = (sampleName: string) => {
+    setFullEditSamples(prev => prev.filter(s => s.sampleName.toLowerCase() !== sampleName.toLowerCase()));
+  };
+
+  const handleFullEditQtyChange = (sampleName: string, newQty: number) => {
+    setFullEditSamples(prev => prev.map(s => s.sampleName.toLowerCase() === sampleName.toLowerCase() ? { ...s, quantityDistributed: Math.max(0, newQty) } : s));
+  };
+
+  const handleSaveFullEdit = () => {
+    if (!fullEditVisitId) return;
+    try {
+      // Validate samples list
+      const validated = fullEditSamples.map(s => {
+        const q = Number(s.quantityDistributed);
+        if (isNaN(q) || q < 0) {
+          throw new Error(lang === 'ar' ? `العدد المدخل للصنف "${s.sampleName}" غير صحيح.` : `Invalid amount for "${s.sampleName}"`);
+        }
+        return {
+          sampleName: standardizeSampleName(s.sampleName),
+          quantityDistributed: q
+        };
+      });
+
+      // Update in our smart strict FIFO engine
+      updateFullVisitLog(fullEditVisitId, {
+        workplaceName: fullEditWorkplace,
+        doctorClass: fullEditDocClass,
+        notes: fullEditNotes,
+        samples: validated
+      });
+
+      setIsFullEditModalOpen(false);
+      setFullEditVisitId(null);
+      setFullEditError(null);
+      reloadDb();
+      alert(lang === 'ar' ? 'تم حفظ التعديلات في كل قواعد البيانات بنظام الـ FIFO والتراكم التنازلي للتخزين بنجاح!' : 'Successfully synchronized entire visit attributes and ledger values using safe FIFO Cascade!');
+    } catch (err: any) {
+      setFullEditError(err?.message || (lang === 'ar' ? 'تعذر الحفظ ومطابقة المخزون المتاح.' : 'Could not validate inventory stock levels.'));
+    }
+  };
+
+  const handleRecomputeAllFIFO = () => {
+    setIsRecalculating(true);
+    setRecalcSummary(null);
+    setTimeout(() => {
+      try {
+        const result = recomputeAllFifoDeductions();
+        setRecalcSummary(result);
+        reloadDb();
+        alert(lang === 'ar' 
+          ? `✔ تم إعادة حساب جميع فواتير الـ FIFO وخصم الزيارات بنجاح!\nتم معالجة ${result.processedVisitsCount} زيارة بنجاح.` 
+          : `✔ Successfully recomputed all FIFO deductions and ledger balances across all visits!\nProcessed ${result.processedVisitsCount} visits.`
+        );
+      } catch (err: any) {
+        alert(`Error: ${err.message}`);
+      } finally {
+        setIsRecalculating(false);
+      }
+    }, 600);
+  };
+
+  const handleWipeMigratedVisits = () => {
+    if (!window.confirm(lang === 'ar' 
+      ? 'تحذير: هل أنت متأكد من رغبتك في تصفير بيانات التطبيق كاملاً؟ سيتم حذف جميع الزيارات وقائمة الأطباء والخطط المجدولة بالكامل، وإرجاع كميات المخزون لمطابقة الفواتير المدخلة بنسبة 100% بدون أي خصومات.' 
+      : 'Warning: Are you sure you want to completely wipe all application data? This will delete all visits, doctors lists, and cycles, and restore warehouse stocks to match entered invoices 100% without any deductions.')) {
+      return;
+    }
+    try {
+      setIsRecalculating(true);
+      const res = wipeAllDataComplete();
+      
+      // Reset files states
+      const resetMsg = lang === 'ar' ? 'لم يتم اختيار ملف' : 'No file chosen';
+      setDoctorsFileName(resetMsg);
+      setJanFileName(resetMsg);
+      setFebFileName(resetMsg);
+      setMarFileName(resetMsg);
+      setAprFileName(resetMsg);
+
+      // Reset migration logs state
+      setMigrationLogs([
+        lang === 'ar' 
+          ? `🗑️ تم مسح ${res.deletedVisitsCount} زيارة وتصفير ${res.deletedDoctorsCount} طبياً بالكامل لمطابقة النظام الجديد.` 
+          : `🗑️ Successfully wiped ${res.deletedVisitsCount} visits and cleared ${res.deletedDoctorsCount} doctors to match the new system.`
+      ]);
+      setMigrationErrors([]);
+      setMigrationSuccessCount(null);
+      setRecalcSummary(null);
+
+      alert(lang === 'ar' 
+        ? `✔ تم بنجاح تصفير التطبيق كاملاً! تم حذف الزيارات السابقة، ومسح قائمة الأطباء، وإرجاع كميات العينات لحالتها الأصلية بالفواتير الصرف بنسبة 100%. سيتم الآن إنعاش الصفحة بنجاح.` 
+        : `✔ Application successfully reset entirely! Wiped visits, cleared doctors, and restored actual stock to match entered invoices 100%. Refreshing page now.`
+      );
+      
+      // Full window reload to guarantee no stale states are cached anywhere in other tabs
+      window.location.reload();
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsRecalculating(false);
+    }
+  };
+
   // Lazy workplace coordinate tracking fixer
   const handleFixWorkplaceLocationInput = (workplaceName: string) => {
     const state = getInitialState();
@@ -529,6 +704,110 @@ export default function VisitsView({ lang }: VisitsViewProps) {
     } finally {
       setIsProcessingState(false);
       if (e.target) e.target.value = ''; // Reset file input
+    }
+  };
+
+  const handleImportFromMediafire = async () => {
+    setIsProcessingState(true);
+    setMigrationLogs(prev => [
+      ...prev,
+      `${lang === 'ar' ? '🕒 جاري الاتصال بخادم MediaFire لتحميل قائمة الأطباء (تتضمن 190 طبيب)...' : '🕒 Connecting to MediaFire servers to download the doctor directory (includes 190 doctors)...'}`
+    ]);
+    try {
+      const response = await fetch('/api/import-mediafire-doctors');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || (lang === 'ar' ? 'فشل استيراد الملف' : 'Failed to import file'));
+      }
+      
+      const data = result.doctors;
+      
+      // Execute migration
+      migrateDoctorsFromLegacyJson(data);
+      
+      setMigrationLogs(prev => [
+        ...prev,
+        `${lang === 'ar' ? `✅ تم تنزيل واستيراد الأطباء من MediaFire بنجاح:` : `✅ Successfully downloaded and imported doctors from MediaFire:`} doctors.json (${data.length} records)`
+      ]);
+      setMigrationErrors([]);
+      setMigrationSuccessCount(data.length);
+      setDoctorsFileName('doctors.json (MediaFire)');
+      reloadDb();
+      alert(lang === 'ar' 
+        ? `✔ تم تنزيل واستيراد ${data.length} طبيب من MediaFire بنجاح وتحديث النظام!` 
+        : `✔ Successfully downloaded and imported ${data.length} doctors from MediaFire and updated the system!`);
+    } catch (err: any) {
+      console.error(err);
+      setMigrationLogs(prev => [
+        ...prev,
+        `${lang === 'ar' ? `❌ فشل عملية تحميل الأطباء من رابط MediaFire: ` : `❌ MediaFire doctor list download failed: `} ${err.message}`
+      ]);
+      alert(lang === 'ar' 
+        ? `فشل تنزيل ملف أطباء MediaFire. يرجى مراجعة الاتصال أو المحاولة مجدداً. الخطأ: ${err.message}` 
+        : `Failed to download Mediafire doctor file. Please check connection or try again. Error: ${err.message}`);
+    } finally {
+      setIsProcessingState(false);
+    }
+  };
+
+  const handleImportMonthFromMediafire = async (monthId: string, monthName: string, expectedMonthStr: string) => {
+    setIsProcessingState(true);
+    setMigrationLogs(prev => [
+      ...prev,
+      `${lang === 'ar' ? `🕒 جاري الاتصال بخادم MediaFire لتحميل سجل زيارات شهر ${monthName}...` : `🕒 Connecting to MediaFire servers to download visit logs for ${monthName}...`}`
+    ]);
+    try {
+      const response = await fetch(`/api/import-mediafire-month?month=${monthId}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || (lang === 'ar' ? 'فشل استيراد الملف' : 'Failed to import file'));
+      }
+
+      const data = result.data;
+
+      // Execute migration using our newly upgraded migrateHistoricalVisitsAndDeductStock which handles both formats!
+      const status = migrateHistoricalVisitsAndDeductStock(data);
+
+      // Update file state Name
+      if (expectedMonthStr === '2026-01') setJanFileName(`${monthName} (MediaFire)`);
+      else if (expectedMonthStr === '2026-02') setFebFileName(`${monthName} (MediaFire)`);
+      else if (expectedMonthStr === '2026-04') setAprFileName(`${monthName} (MediaFire)`);
+      else if (expectedMonthStr === '2026-03') setMarFileName(`${monthName} (MediaFire)`);
+
+      setMigrationLogs(prev => [
+        ...prev,
+        `${lang === 'ar' 
+          ? `✔ تم تحميل ودمج زيارات شهر ${monthName} من MediaFire بنظام FIFO الرجعي:` 
+          : `✔ Mediafire retroactive FIFO sync successfully processed for ${monthName}:`} ${status.successCount} succeeded, ${status.errors.length} alarms`
+      ]);
+      setMigrationErrors(status.errors);
+      setMigrationSuccessCount(status.successCount);
+      reloadDb();
+      alert(lang === 'ar' 
+        ? `✔ تم تنزيل وخصم زيارات شهر ${monthName} بنجاح من MediaFire بنظام FIFO الرجعي والتراكمي!` 
+        : `✔ Successfully downloaded, legacy ledgered, and computed FIFO deductions for ${monthName} bucket directly from MediaFire!`
+      );
+    } catch (err: any) {
+      console.error(err);
+      setMigrationLogs(prev => [
+        ...prev,
+        `${lang === 'ar' ? `❌ فشل دمج زيارات شهر ${monthName}: ` : `❌ Failed to ingest ${monthName} visit logs: `} ${err.message}`
+      ]);
+      alert(lang === 'ar' 
+        ? `فشل دمج ملف شهر ${monthName}. الخطأ: ${err.message}` 
+        : `Failed to download or integrate month ${monthName}. Error: ${err.message}`);
+    } finally {
+      setIsProcessingState(false);
     }
   };
 
@@ -928,6 +1207,35 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                         </div>
                       )}
                     </div>
+                  )}
+
+                  {/* Realtime Geo gap alert for the selected doctor's workplace in Doctors tab */}
+                  {activeTab === 'Doctor' && workplaceName.trim() !== '' && (
+                    (() => {
+                      const wp = db.workplaces.find(
+                        (w) => w.name.trim().toLowerCase() === workplaceName.trim().toLowerCase()
+                      );
+                      const hasMissingCoords = !wp || wp.latitude === null || wp.longitude === null;
+                      if (hasMissingCoords) {
+                        return (
+                          <div className="md:col-span-2 bg-amber-50/90 border border-amber-200 text-amber-900 text-xs p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse text-right">
+                            <div className="flex items-center gap-2 font-bold">
+                              <span className="text-sm">⚠️</span>
+                              <span>{lang === 'ar' ? 'الطبيب بدون موقع مؤرشف حالياً!' : 'Doctor has no saved location!'}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleFixWorkplaceLocationInput(workplaceName)}
+                              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer self-end sm:self-auto"
+                            >
+                              <span>📍</span>
+                              <span>{lang === 'ar' ? 'تثبيت الموقع الحالي وحل الفجوة' : 'Pin Current Location & Resolve'}</span>
+                            </button>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()
                   )}
                 </div>
 
@@ -1341,19 +1649,12 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                                     <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded font-mono text-[10px]">
                                       {s.quantityDistributed} {lang === 'ar' ? 'وحدات' : 'items'}
                                     </span>
-                                    {/* Edit FIFO Quantity Button */}
+                                    {/* Edit Full Visit Details Button (Modal Popup) */}
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setEditingVisitId(v.id);
-                                        setEditingSampleName(s.sampleName);
-                                        setEditingCurrentQty(s.quantityDistributed);
-                                        setEditingNewQtyValue(String(s.quantityDistributed));
-                                        setEditingVisitDate(v.visitDate);
-                                        setEditErrorMsg(null);
-                                      }}
+                                      onClick={() => handleOpenFullEditModal(v)}
                                       className="p-1 hover:bg-purple-200 hover:text-purple-900 rounded text-purple-600 transition-colors cursor-pointer"
-                                      title={lang === 'ar' ? 'تعديل كمية الـ FIFO' : 'Edit FIFO quantity'}
+                                      title={lang === 'ar' ? 'تعديل جميع بيانات الزيارة' : 'Edit all visit data'}
                                     >
                                       <Edit3 className="w-3.5 h-3.5" />
                                     </button>
@@ -1503,14 +1804,41 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                     <p className="text-xs text-slate-500 font-medium">
                       {lang === 'ar' ? 'يدعم الملفات حقيقية الامتداد .json تحتوي مصفوفة الأطباء' : 'Accepts standard doctors directory config .json block'}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => doctorsFileRef.current?.click()}
-                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors"
-                    >
-                      {lang === 'ar' ? 'اختر ملف الأطباء (JSON)' : 'Choose Doctors File (JSON)'}
-                    </button>
-                    <div className="text-[10px] text-slate-400 italic">
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => doctorsFileRef.current?.click()}
+                        className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg cursor-pointer transition-colors border border-slate-200"
+                      >
+                        {lang === 'ar' ? 'اختر ملف الأطباء (JSON)' : 'Choose Doctors File (JSON)'}
+                      </button>
+                      
+                      <div className="flex items-center justify-center gap-2 text-slate-300 text-[10px] my-1 font-bold">
+                        <span>—</span>
+                        <span>{lang === 'ar' ? 'أو' : 'OR'}</span>
+                        <span>—</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isProcessingState}
+                        onClick={handleImportFromMediafire}
+                        className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-indigo-500/10"
+                      >
+                        {isProcessingState ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            {lang === 'ar' ? 'جاري التحميل والتثبيت والدمج...' : 'Downloading & Ingesting...'}
+                          </>
+                        ) : (
+                          <>
+                            <Database className="w-4 h-4 text-purple-200 animate-pulse" />
+                            {lang === 'ar' ? 'تحميل مباشر من رابط MediaFire (190 طبيب)' : 'Download & Import doctors from MediaFire (190)'}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-slate-400 italic mt-1.5">
                       {lang === 'ar' ? `الملف المختار: ${doctorsFileName}` : `Selected file: ${doctorsFileName}`}
                     </div>
                   </div>
@@ -1585,7 +1913,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                     ].map((m) => {
                       const monthName = lang === 'ar' ? m.labelAr : m.labelEn;
                       return (
-                        <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2 bg-white rounded-lg border border-slate-100">
+                        <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2 bg-white rounded-lg border border-slate-100 animate-fadeIn">
                           {/* Left text month detail */}
                           <div className="flex items-center gap-1.5">
                             {!m.isUnlocked ? (
@@ -1606,7 +1934,20 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                           </div>
 
                           {/* Action upload file-pickers details */}
-                          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                          <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
+                            {/* Direct Mediafire Import Button */}
+                            {m.isUnlocked && !m.isComplete && (
+                              <button
+                                type="button"
+                                disabled={isProcessingState}
+                                onClick={() => handleImportMonthFromMediafire(m.id, monthName, m.dateStr)}
+                                className="px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm shadow-indigo-500/10 shrink-0"
+                              >
+                                <Database className="w-3 h-3 text-purple-200" />
+                                {lang === 'ar' ? 'تحميل مباشر من MediaFire' : 'Direct Download'}
+                              </button>
+                            )}
+
                             {/* Open File dialog button */}
                             <button
                               type="button"
@@ -1615,13 +1956,13 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                               className={`px-2.5 py-1.5 rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
                                 !m.isUnlocked 
                                   ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                                  : 'bg-purple-50 outline-none hover:bg-purple-100 text-purple-700 border border-purple-200'
+                                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
                               }`}
                             >
                               <Upload className="w-3 h-3" />
                               {m.fileName !== (lang === 'ar' ? 'لم يتم اختيار ملف' : 'No file chosen') 
                                 ? m.fileName 
-                                : lang === 'ar' ? 'اختر ملف JSON' : 'Pick JSON File'}
+                                : lang === 'ar' ? 'ملف يدوي' : 'Pick PDF/JSON'}
                             </button>
 
                             {/* Simulation toggle buttons for instant testing */}
@@ -1642,22 +1983,92 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                   </div>
                 </div>
               </div>
+
+              {/* 3. Retroactive FIFO Stock Realignment */}
+              <div className="bg-purple-50/35 p-5 rounded-xl border border-purple-100 flex flex-col justify-between space-y-4">
+                <div className="space-y-3">
+                  <h4 className="font-bold text-purple-950 text-xs flex items-center gap-1.5">
+                    <ArrowUpDown className="w-4 h-4 text-purple-600 animate-pulse font-bold" />
+                    {lang === 'ar' ? 'مزامنة فواتير ومخازن الـ FIFO (خصم الزيارات القديمة)' : 'FIFO Ledger Synchronizer (Deduct Old Visits)'}
+                  </h4>
+                  
+                  <p className="text-[11px] text-purple-950/80 leading-relaxed text-right">
+                    {lang === 'ar' 
+                      ? 'إذا قمت باستيراد زيارات سابقة أو تعديل فواتير المستودع لاحقاً، تتيح لك هذه الأداة إعادة ضبط مخزون جميع فواتير النظام لخصم كافة العينات الموزعة تاريخياً بترتيب زمني صارم (FIFO) وبمنتهى الدقة.' 
+                      : 'If you imported historical visits or added warehouse invoices later, use this tool to re-calculate and apply precise chronological (FIFO) stock deductions across all visit logs.'}
+                  </p>
+
+                  <button
+                    type="button"
+                    disabled={isRecalculating}
+                    onClick={handleRecomputeAllFIFO}
+                    className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-purple-500/10"
+                  >
+                    {isRecalculating ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {lang === 'ar' ? 'جاري إعادة المعالجة والحساب للـ FIFO...' : 'Re-allocating stocks via FIFO cascade...'}
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4 text-purple-200" />
+                        {lang === 'ar' ? 'بدء خصم العينات وإعادة مطابقة الـ FIFO' : 'Apply Retroactive FIFO Deductions'}
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Reset & Rollback All Migrated Visits */}
+              <div className="bg-red-50/35 p-5 rounded-xl border border-red-100 flex flex-col justify-between space-y-4">
+                <div className="space-y-3 font-sans">
+                  <h4 className="font-bold text-red-950 text-xs flex items-center gap-1.5">
+                    <Trash2 className="w-4 h-4 text-red-600 font-bold" />
+                    {lang === 'ar' ? 'تصفير بيانات التطبيق كاملاً وقائمة الأطباء' : 'Reset All App Data & Doctors List'}
+                  </h4>
+                  
+                  <p className="text-[11px] text-red-950/80 leading-relaxed text-right">
+                    {lang === 'ar' 
+                      ? 'تقوم هذه الأداة بحذف كافة الزيارات المسجلة وقائمة الأطباء والخطط المجدولة، وإرجاع كميات المخزون للكميات الأصلية المدخلة بالفواتير بنسبة 100% لتصحيح أوجه التطابق من البداية.' 
+                      : 'Deletes all visits, clears the entire doctors database list, resets weekly plans, and restores stock quantities back to their initial invoice quantities, allowing a clean slate for correct imports.'}
+                  </p>
+
+                  <button
+                    type="button"
+                    disabled={isRecalculating}
+                    onClick={handleWipeMigratedVisits}
+                    className="w-full py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-red-500/10"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-200" />
+                    {lang === 'ar' ? 'تصفير وتطهير الذاكرة واستعادة المخزون الأصلي' : 'Full Wipe & Recover Original Stock'}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Stamped Migration Log HUD */}
-            {(migrationSuccessCount !== null || migrationLogs.length > 0) && (
+            {(migrationSuccessCount !== null || migrationLogs.length > 0 || recalcSummary !== null) && (
               <div className="bg-slate-900 text-slate-300 rounded-xl p-5 border border-slate-800 space-y-3 font-mono text-[11px] text-right">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-2">
                   <span className="text-purple-400 font-bold">💻 {lang === 'ar' ? 'سجل ترحيل النظام المركزي:' : 'Migration central terminal log:'}</span>
-                  {migrationSuccessCount !== null && (
-                    <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-0.5 rounded font-sans text-xs font-bold">
-                      {lang === 'ar' ? `بنجاح: ${migrationSuccessCount} عينة` : `Success: ${migrationSuccessCount} items`}
+                  {(migrationSuccessCount !== null || recalcSummary !== null) && (
+                    <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-0.5 rounded font-sans text-xs font-bold animate-pulse">
+                      {lang === 'ar' 
+                        ? `بنجاح: ${recalcSummary ? recalcSummary.totalDeductionsCount : migrationSuccessCount} عينة` 
+                        : `Success: ${recalcSummary ? recalcSummary.totalDeductionsCount : migrationSuccessCount} items`}
                     </span>
                   )}
                 </div>
 
                 {/* Monospace terminal logs */}
                 <div className="max-h-44 overflow-y-auto divide-y divide-slate-800/40 text-[10px] space-y-1 pr-1 text-right">
+                  {recalcSummary && (
+                    <div className="py-1 text-emerald-400 font-bold">
+                      {lang === 'ar'
+                        ? `✔ تم الانتهاء بنجاح من المزامنة والخصم التراكمي: معالجة ${recalcSummary.processedVisitsCount} زيارات وصرف ${recalcSummary.totalDeductionsCount} عينات بنظام الـ FIFO.`
+                        : `✔ Complete: Processed ${recalcSummary.processedVisitsCount} visits and spent ${recalcSummary.totalDeductionsCount} sample units via FIFO cascade.`}
+                    </div>
+                  )}
                   {migrationLogs.map((log, i) => (
                     <div key={i} className="py-1 text-slate-300 flex items-start gap-1 justify-end text-right">
                       <span>{log}</span>
@@ -1667,10 +2078,15 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                 </div>
 
                 {/* Monospace warning/infraction alarms */}
-                {migrationErrors.length > 0 && (
+                {((recalcSummary && recalcSummary.insufficientStockAlarms.length > 0) || migrationErrors.length > 0) && (
                   <div className="border-t border-slate-800 pt-3 space-y-1.5 text-xs text-right">
                     <div className="text-amber-400 font-bold font-sans">⚠️ {lang === 'ar' ? 'إنذارات ومخالفات الخصم الرجعي (FIFO Alarms):' : 'Retroactive Deduction Warnings (FIFO Alarms):'}</div>
-                    <div className="space-y-1">
+                    <div className="space-y-1 text-right">
+                      {recalcSummary?.insufficientStockAlarms.map((err, i) => (
+                        <div key={`recalc-${i}`} className="text-red-400 text-[11px] bg-red-400/5 border border-red-400/15 p-1 px-2 rounded text-right">
+                          • {err}
+                        </div>
+                      ))}
                       {migrationErrors.map((err, i) => (
                         <div key={i} className="text-red-400 text-[11px] bg-red-400/5 border border-red-400/15 p-2 rounded text-right">
                           • {err}
@@ -1895,6 +2311,259 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                   {lang === 'ar' ? 'موافق، سأقوم بالتعديل لتجنب التلاعب' : 'Understood, I will correct'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Visit Popup Modal Editor */}
+      {isFullEditModalOpen && fullEditVisitId && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-100 overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4.5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Edit3 className="w-5 h-5 shrink-0 animate-pulse text-purple-200" />
+                <div>
+                  <h4 className="font-bold text-sm tracking-tight text-right">
+                    {lang === 'ar' ? 'تعديل بيانات المتابعة بالكامل' : 'Edit Visit Details & FIFO Ledger'}
+                  </h4>
+                  <p className="text-[10px] text-purple-200 font-medium text-right">
+                    {lang === 'ar' ? 'مزامنة تلقائية للمخزن، كلاس الطبيب ومكان العمل' : 'Automated sync of inventory, class level and workplace coordinates'}
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsFullEditModalOpen(false)}
+                className="text-white/75 hover:text-white font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5 overflow-y-auto text-right">
+              
+              {/* Workplace Name */}
+              <div className="space-y-1.5 text-right relative">
+                <label className="text-xs font-bold text-slate-700">
+                  {lang === 'ar' ? 'مكان العمل (العيادة/المستشفى)' : 'Workplace Name'}
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm outline-none text-right placeholder-slate-400"
+                  value={fullEditWorkplace}
+                  placeholder={lang === 'ar' ? 'ابحث أو ادخل اسم العيادة...' : 'Search or enter workplace...'}
+                  onChange={(e) => {
+                    setFullEditWorkplace(e.target.value);
+                    const q = e.target.value;
+                    const items = searchAutocomplete('workplace', q);
+                    setFullEditAutocompleteResults(items);
+                    setFullEditSearchFocused(true);
+                  }}
+                  onFocus={() => {
+                    const items = searchAutocomplete('workplace', fullEditWorkplace);
+                    setFullEditAutocompleteResults(items);
+                    setFullEditSearchFocused(true);
+                  }}
+                />
+                {fullEditSearchFocused && fullEditAutocompleteResults.length > 0 && (
+                  <div className="absolute z-50 w-full bg-white border border-slate-200 rounded-xl mt-1 shadow-lg max-h-32 overflow-y-auto divide-y divide-slate-50">
+                    {fullEditAutocompleteResults.map((wp) => (
+                      <button
+                        key={wp}
+                        type="button"
+                        onClick={() => {
+                          setFullEditWorkplace(wp);
+                          setFullEditSearchFocused(false);
+                        }}
+                        className="w-full text-right px-3.5 py-2 text-xs hover:bg-slate-50 text-slate-700 font-medium transition-colors cursor-pointer"
+                      >
+                        {wp}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Class rating */}
+              <div className="space-y-1.5 text-right">
+                <label className="text-xs font-bold text-slate-700">
+                  {lang === 'ar' ? 'كلاس الطبيب (Class Rating)' : 'Doctor Class Rating'}
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['A', 'B', 'C'] as const).map((rating) => (
+                    <button
+                      key={rating}
+                      type="button"
+                      onClick={() => setFullEditDocClass(rating)}
+                      className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        fullEditDocClass === rating
+                          ? 'bg-purple-600 text-white border-purple-600 shadow-sm shadow-purple-500/10'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Class {rating}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* List of current samples */}
+              <div className="space-y-2.5 text-right">
+                <label className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-1 block">
+                  {lang === 'ar' ? 'العينات والكميات الموزعة في هذه الزيارة:' : 'Distributed Samples & Amounts for this visit:'}
+                </label>
+
+                {fullEditSamples.length === 0 ? (
+                  <div className="text-slate-400 text-xs italic py-2">
+                    {lang === 'ar' ? 'لا توجد عينات مسجلة حالياً لهذه الزيارة' : 'No samples added yet'}
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                    {fullEditSamples.map((s, idx) => {
+                      const lookupVisit = db.visits.find(v => v.id === fullEditVisitId);
+                      const visitDateStr = lookupVisit ? lookupVisit.visitDate : '';
+                      const avail = getSampleStockBalanceForDate(s.sampleName, visitDateStr);
+                      // In the edit view, the available stock check needs to account for the current visit's existing qty 
+                      // which will be added back via rollback during final save. We'll show the actual real-time stock 
+                      // up to the exact date, which may be 0 if fully consumed, but it's safe to note that rollback is computed atomically.
+                      return (
+                        <div key={idx} className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex items-center justify-between gap-3 flex-wrap">
+                          <div className="flex-1 min-w-[120px]">
+                            <div className="font-semibold text-xs text-slate-800 font-sans">{s.sampleName}</div>
+                            <div className="text-[9px] text-emerald-700 font-semibold mt-0.5">
+                              {lang === 'ar' ? `المخزن المتوفر بالتاريخ: ` : `Available dated stock: `}
+                              <strong className="font-mono text-xs">{avail}</strong>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="0"
+                              className="w-16 bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-right font-mono outline-none focus:border-purple-500"
+                              value={s.quantityDistributed}
+                              onChange={(e) => handleFullEditQtyChange(s.sampleName, Number(e.target.value))}
+                            />
+                            
+                            <button
+                              type="button"
+                              onClick={() => handleFullEditRemoveSample(s.sampleName)}
+                              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              title={lang === 'ar' ? 'حذف العينة' : 'Delete sample'}
+                            >
+                              <Trash className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Add New Sample Row helper UI inside popup */}
+              <div className="bg-purple-50/40 border border-purple-100/40 p-4.5 rounded-2xl space-y-2.5">
+                <div className="text-[11px] font-bold text-purple-950 flex items-center gap-1">
+                  <span>✨</span>
+                  <span>{lang === 'ar' ? 'صرف وإضافة عينة عينات إضافية جديدة للطبيب' : 'Dispense and Add New Sample Item'}</span>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 relative">
+                  <div className="sm:col-span-2 relative">
+                    <input
+                      type="text"
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-purple-500 text-right"
+                      placeholder={lang === 'ar' ? 'اسم الصنف الدوائي الأساسي...' : 'Search medicine...'}
+                      value={fullEditNewSampleName}
+                      onChange={(e) => {
+                        setFullEditNewSampleName(e.target.value);
+                        setFullEditAutocompleteResults(searchAutocomplete('sample', e.target.value));
+                        setFullEditSearchFocused(false); 
+                      }}
+                    />
+                    {fullEditNewSampleName.trim() !== '' && (
+                      <div className="absolute z-50 w-full bg-white border border-slate-200 rounded-lg mt-1 shadow-lg max-h-24 overflow-y-auto divide-y divide-slate-50">
+                        {searchAutocomplete('sample', fullEditNewSampleName).map((alt) => (
+                          <button
+                            key={alt}
+                            type="button"
+                            onClick={() => {
+                              setFullEditNewSampleName(alt);
+                            }}
+                            className="w-full text-right px-3 py-1.5 text-xs hover:bg-slate-50 text-slate-700 transition-colors"
+                          >
+                            {alt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-1.5 items-center">
+                    <input
+                      type="number"
+                      min="1"
+                      className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center font-mono outline-none"
+                      value={fullEditNewSampleQty}
+                      onChange={(e) => setFullEditNewSampleQty(e.target.value)}
+                    />
+                    
+                    <button
+                      type="button"
+                      onClick={handleFullEditAddSample}
+                      className="flex-1 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-0.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{lang === 'ar' ? 'صرف' : 'Add'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1.5 text-right">
+                <label className="text-xs font-bold text-slate-700">
+                  {lang === 'ar' ? 'ملاحظات وتفاصيل إضافية عن الزيارة' : 'Visit Notes & Details'}
+                </label>
+                <textarea
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white rounded-xl px-3.5 py-2 text-xs outline-none text-right h-16 placeholder-slate-400 resize-none"
+                  value={fullEditNotes}
+                  placeholder={lang === 'ar' ? 'اكتب ملاحظات اللقاء هنا...' : 'Enter meeting notes...'}
+                  onChange={(e) => setFullEditNotes(e.target.value)}
+                />
+              </div>
+
+              {/* Internal FIFO safeguarding alerts inside edit panel */}
+              {fullEditError && (
+                <div className="bg-red-50 border border-red-100 text-red-700 text-xs p-3.5 rounded-xl flex items-start gap-2 text-right">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" />
+                  <span className="leading-relaxed font-semibold">{fullEditError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2.5 px-6 py-4.5 bg-slate-50 border-t border-slate-100 text-right">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFullEditModalOpen(false);
+                  setFullEditVisitId(null);
+                }}
+                className="px-4.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveFullEdit}
+                className="px-5.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer"
+              >
+                {lang === 'ar' ? 'حفظ التغييرات ومزامنة FIFO' : 'Save & Sync FIFO'}
+              </button>
             </div>
           </div>
         </div>

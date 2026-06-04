@@ -44,6 +44,116 @@ app.get('/api/health', (req, res) => {
 });
 
 /**
+ * Downloads and extracts the doctors registry from the Mediafire document URL
+ */
+app.get('/api/import-mediafire-doctors', async (req, res) => {
+  try {
+    const url = 'https://www.mediafire.com/file/tq8388eshdvvi3r/doctors.json/file';
+    console.log('Fetching main mediafire page on server...');
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Mediafire returned HTTP status ${response.status}`);
+    }
+
+    const html = await response.text();
+    const buttonMatch = html.match(/id="downloadButton"[^>]*href="([^"]+)"/i) || html.match(/href="([^"]+)"[^>]*id="downloadButton"/i);
+    
+    if (!buttonMatch) {
+      throw new Error('Could not find the direct download link inside Mediafire page HTML');
+    }
+    
+    const downloadUrl = buttonMatch[1];
+    console.log('Downloading actual JSON config from:', downloadUrl);
+    
+    const fileRes = await fetch(downloadUrl);
+    if (!fileRes.ok) {
+      throw new Error(`Could not download the target JSON file: status ${fileRes.status}`);
+    }
+    
+    const json = await fileRes.json() as any;
+    
+    // Check if json contains doctors list
+    let doctorsArray: any[] = [];
+    if (json && json.doctors && Array.isArray(json.doctors)) {
+      doctorsArray = json.doctors;
+    } else if (Array.isArray(json)) {
+      doctorsArray = json;
+    } else {
+      throw new Error('Successfully completed download but did not find an array of doctors under "doctors" key or root');
+    }
+
+    res.json({
+      success: true,
+      doctors: doctorsArray,
+      total: doctorsArray.length
+    });
+  } catch (error: any) {
+    console.error('Error importing Mediafire doctors:', error);
+    res.status(500).json({ success: false, error: error.message || 'Error occurred while pulling database records' });
+  }
+});
+
+/**
+ * Downloads and extracts monthly historical visits data from Mediafire
+ */
+app.get('/api/import-mediafire-month', async (req, res) => {
+  const { month } = req.query;
+  const urls: Record<string, string> = {
+    jan: 'https://www.mediafire.com/file/2dis9oi6rvxmnvj/%25D8%25B3%25D8%25AC%25D9%2584_%25D8%25B2%25D9%258A%25D8%25A7%25D8%25B1%25D8%25A7%25D8%25AA_%25D8%25B4%25D9%2587%25D8%25B1_%25D9%258A%25D9%2586%25D8%25A7%25D9%258A%25D8%25B1.json/file',
+    feb: 'https://www.mediafire.com/file/1x3i3jtn0vsib6x/%25D8%25B3%25D8%25AC%25D9%2584_%25D8%25B2%25D9%258A%25D8%25A7%25D8%25B1%25D8%25A7%25D8%25AA_%25D8%25B4%25D9%2587%25D8%25B1_%25D9%2581%25D8%25A8%25D8%25B1%25D8%25A7%25D9%258A%25D8%25B1.json/file',
+    mar: 'https://www.mediafire.com/file/1kmqv010bnztsnx/%25D8%25B3%25D8%25AC%25D9%2584_%25D8%25B2%25D9%258A%25D8%25A7%25D8%25B1%25D8%25A7%25D8%25AA_%25D8%25B4%25D9%2587%25D8%25B1_%25D9%2585%25D8%25A7%25D8%25B1%25D8%25B3.json/file',
+    apr: 'https://www.mediafire.com/file/2xof4y42nit683e/%25D8%25B3%25D8%25AC%25D9%2584_%25D8%25B2%25D9%258A%25D8%25A7%25D8%25B1%25D8%25A7%25D8%25AA_%25D8%25B4%25D9%2587%25D8%25B1_%25D8%25A7%25D8%25A8%25D8%25B1%25D9%258A%25D9%2584.json/file'
+  };
+
+  const url = urls[String(month)];
+  if (!url) {
+    return res.status(400).json({ success: false, error: 'Invalid or missing month parameter' });
+  }
+
+  try {
+    console.log(`Fetching main mediafire page on server for month: ${month}...`);
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Mediafire returned HTTP status ${response.status}`);
+    }
+
+    const html = await response.text();
+    const buttonMatch = html.match(/id="downloadButton"[^>]*href="([^"]+)"/i) || html.match(/href="([^"]+)"[^>]*id="downloadButton"/i);
+    
+    if (!buttonMatch) {
+      throw new Error('Could not find the direct download link inside Mediafire page HTML');
+    }
+    
+    const downloadUrl = buttonMatch[1];
+    console.log(`Downloading actual JSON config for ${month} from:`, downloadUrl);
+    
+    const fileRes = await fetch(downloadUrl);
+    if (!fileRes.ok) {
+      throw new Error(`Could not download the target JSON file: status ${fileRes.status}`);
+    }
+    
+    const data = await fileRes.json() as any;
+    res.json({
+      success: true,
+      data
+    });
+  } catch (error: any) {
+    console.error(`Error importing Mediafire month ${month}:`, error);
+    res.status(500).json({ success: false, error: error.message || 'Error occurred while pulling month data' });
+  }
+});
+
+/**
  * AI Weekly Plan Generator endpoint
  */
 app.post('/api/ai/plan-generator', async (req, res) => {
