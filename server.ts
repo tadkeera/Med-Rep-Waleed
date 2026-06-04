@@ -34,7 +34,7 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 7860;
 
 app.use(express.json());
 
