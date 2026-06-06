@@ -271,6 +271,43 @@ export function registerNewEntity(type: 'doctor' | 'workplace', name: string, ex
   }
 }
 
+export function updateDoctor(doctorId: string, updates: Partial<Doctor>): Doctor | null {
+  const state = getInitialState();
+  const index = state.doctors.findIndex(d => d.id === doctorId);
+  if (index === -1) return null;
+
+  const originalName = state.doctors[index].name;
+  const updatedDoc = { ...state.doctors[index], ...updates };
+  state.doctors[index] = updatedDoc;
+
+  // If the doctor name changed, we also need to update all VisitLogs to maintain referential integrity
+  if (updates.name && updates.name !== originalName) {
+    state.visits.forEach(v => {
+      if (v.clientType === 'Doctor' && v.doctorName === originalName) {
+        v.doctorName = updates.name;
+        // Optionally update the class rating if it was changed
+        if (updates.classRating) {
+          v.doctorClass = updates.classRating;
+        }
+        if (updates.speciality) {
+          v.doctorSpeciality = updates.speciality;
+        }
+      }
+    });
+  } else if (updates.classRating || updates.speciality) {
+     // Even if name didn't change, update the class and speciality in visits 
+     state.visits.forEach(v => {
+      if (v.clientType === 'Doctor' && v.doctorName === originalName) {
+        if (updates.classRating) v.doctorClass = updates.classRating;
+        if (updates.speciality) v.doctorSpeciality = updates.speciality;
+      }
+    });
+  }
+
+  saveState(state);
+  return updatedDoc;
+}
+
 export function getSampleStockBalance(sampleName: string): number {
   const state = getInitialState();
   let total = 0;
@@ -355,7 +392,6 @@ export function deductFifoStock(sampleName: string, quantity: number, visitDate?
 }
 
 export function addVisitLog(visit: Omit<VisitLog, 'id'>): VisitLog {
-  const state = getInitialState();
   const id = `visit-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
 
   const processedSamples: VisitSample[] = visit.samples.map((sample) => {
@@ -375,8 +411,9 @@ export function addVisitLog(visit: Omit<VisitLog, 'id'>): VisitLog {
     samples: processedSamples,
   };
 
-  state.visits.push(finalVisit);
-  saveState(state);
+  const finalState = getInitialState();
+  finalState.visits.push(finalVisit);
+  saveState(finalState);
   return finalVisit;
 }
 

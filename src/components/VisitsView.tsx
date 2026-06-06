@@ -24,6 +24,7 @@ import {
   wipeAllDataComplete,
   saveState
 } from '../utils/db';
+import { gpsTracker, LocationData, GeolocationError, GeolocationStatus } from '../utils/geolocation';
 import { VisitLog, VisitSample, Doctor, Workplace } from '../types';
 import { Calendar, Users, MapPin, Package, AlertCircle, Plus, Trash, Check, Compass, Sparkles, Navigation, Edit3, Search, Database, Upload, ArrowLeftRight, Trash2, ArrowUpDown, Lock, Unlock, FileText, CheckCircle2, Loader2 } from 'lucide-react';
 import LeafletMap from './LeafletMap';
@@ -47,7 +48,7 @@ export default function VisitsView({ lang }: VisitsViewProps) {
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [isFetchingGps, setIsFetchingGps] = useState(false);
-  const [gpsFallbackUsed, setGpsFallbackUsed] = useState(false);
+  const [gpsError, setGpsError] = useState<string | null>(null);
 
   // Repeatable samples array
   const [samples, setSamples] = useState<{ sampleName: string; qty: number }[]>([
@@ -252,10 +253,10 @@ export default function VisitsView({ lang }: VisitsViewProps) {
     },
   }[lang];
 
-  // Geolocation handling - Indoor Hospital Rule Fallback
+  // High Precision Geolocation integration
   const triggerGpsAcquisition = () => {
     setIsFetchingGps(true);
-    setGpsFallbackUsed(false);
+    setGpsError(null);
 
     if (!isGpsEnabled) {
       setLatitude(null);
@@ -264,30 +265,34 @@ export default function VisitsView({ lang }: VisitsViewProps) {
       return;
     }
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLatitude(position.coords.latitude);
-          setLongitude(position.coords.longitude);
-          setIsFetchingGps(false);
-        },
-        (error) => {
-          console.warn('GPS Signal unavailable inside hospital building, applying fallback:', error);
-          // Riyadh mock values fallback coordinates mimicking indoor rule
-          setLatitude(24.7136 + (Math.random() - 0.5) * 0.005);
-          setLongitude(46.6753 + (Math.random() - 0.5) * 0.005);
-          setGpsFallbackUsed(true);
-          setIsFetchingGps(false);
-        },
-        { timeout: 4000, enableHighAccuracy: false } // fast response, no freezing
-      );
-    } else {
-      setLatitude(24.7136);
-      setLongitude(46.6753);
-      setGpsFallbackUsed(true);
-      setIsFetchingGps(false);
-    }
+    gpsTracker.startTracking(
+      (location: LocationData) => {
+        setLatitude(location.latitude);
+        setLongitude(location.longitude);
+        setGpsError(null);
+        // Do not turn off isFetchingGps because it's continuous, or turn it off to indicate first lock.
+        // We will turn it off on the first successful lock to indicate readiness.
+        setIsFetchingGps(false);
+      },
+      (error: GeolocationError) => {
+        console.warn('High precision tracking error:', error);
+        setGpsError(error.message);
+        setIsFetchingGps(false);
+      },
+      (status: GeolocationStatus) => {
+        if (status === 'requesting') {
+          setIsFetchingGps(true);
+        }
+      }
+    );
   };
+
+  useEffect(() => {
+    // Cleanup GPS tracking on unmount
+    return () => {
+      gpsTracker.stopTracking();
+    };
+  }, []);
 
   // Form Autocomplete Searches
   const handleInputChange = (field: 'doctor' | 'workplace', val: string) => {
@@ -344,6 +349,11 @@ export default function VisitsView({ lang }: VisitsViewProps) {
   // Main Form Submit trigger and Interceptors mapping
   const handleSubmitVisit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isGpsEnabled && (!latitude || !longitude || gpsError)) {
+      alert(lang === 'ar' ? 'تحذير: لا يمكن بدء زيارة جديدة بدون تحديد الموقع الجغرافي. يرجى تفعيل الموقع أو قفل التتبع للإستمرار.' : 'Warning: Cannot start a new visit without accurate geolocation. Please enable location services or turn off tracking.');
+      return;
+    }
 
     if (activeTab === 'Doctor') {
       if (!doctorName.trim() || !workplaceName.trim()) return;
@@ -423,9 +433,9 @@ export default function VisitsView({ lang }: VisitsViewProps) {
       }
     }
 
-    // Prepare visit coordinates. If GPS is OFF, force null/undefined without fallback
-    const finalLat = isGpsEnabled ? (latitude || matchedWork?.latitude || 24.7136) : undefined;
-    const finalLng = isGpsEnabled ? (longitude || matchedWork?.longitude || 46.6753) : undefined;
+    // Prepare visit coordinates. If GPS is manually turned off, we store undefined.
+    const finalLat = isGpsEnabled ? (latitude || 0) : undefined;
+    const finalLng = isGpsEnabled ? (longitude || 0) : undefined;
 
     addVisitLog({
       visitDate,
@@ -472,8 +482,8 @@ export default function VisitsView({ lang }: VisitsViewProps) {
 
   const handleSaveWorkplaceFromConfirm = () => {
     const newWork = registerNewEntity('workplace', newWorkplaceCandidate, {
-      latitude: latitude || 24.7136,
-      longitude: longitude || 46.6753,
+      latitude: (isGpsEnabled && latitude) ? latitude : undefined,
+      longitude: (isGpsEnabled && longitude) ? longitude : undefined,
     });
     setShowWorkplaceModal(false);
     reloadDb();
@@ -667,19 +677,24 @@ export default function VisitsView({ lang }: VisitsViewProps) {
     const state = getInitialState();
     const wp = state.workplaces.find(w => w.name.trim().toLowerCase() === workplaceName.trim().toLowerCase());
     if (wp) {
-      const pinLat = latitude || 24.7136;
-      const pinLng = longitude || 46.6753;
+      if (!latitude || !longitude) {
+        alert(lang === 'ar' ? 'لا يوجد إحداثيات مجمعة للتثبيت' : 'No acquired coordinates to pin');
+        return;
+      }
+      const pinLat = latitude;
+      const pinLng = longitude;
       wp.latitude = pinLat;
       wp.longitude = pinLng;
       saveState(state);
       reloadDb();
       alert(lang === 'ar' 
-        ? `تم بنجاح تثبيت الإحداثيات لـ (${workplaceName}) على خطوط: ${pinLat.toFixed(4)}, ${pinLng.toFixed(4)}`
-        : `Successfully pinned location for (${workplaceName}) at: ${pinLat.toFixed(4)}, ${pinLng.toFixed(4)}`
+        ? `تم بنجاح تثبيت الإحداثيات لـ (${workplaceName}) على خطوط: ${pinLat.toFixed(7)}, ${pinLng.toFixed(7)}`
+        : `Successfully pinned location for (${workplaceName}) at: ${pinLat.toFixed(7)}, ${pinLng.toFixed(7)}`
       );
     } else {
-      const pinLat = latitude || 24.7136;
-      const pinLng = longitude || 46.6753;
+      if (!latitude || !longitude) return;
+      const pinLat = latitude;
+      const pinLng = longitude;
       registerNewEntity('workplace', workplaceName, { latitude: pinLat, longitude: pinLng });
       reloadDb();
       alert(lang === 'ar' 
@@ -1107,6 +1122,15 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                 </button>
               </div>
 
+              {gpsError && (
+                <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-sm flex items-start gap-3 mt-4">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold">{lang === 'ar' ? 'خطأ في الموقع:' : 'Location Error:'}</span> {gpsError}
+                  </div>
+                </div>
+              )}
+
               <form onSubmit={handleSubmitVisit} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
@@ -1244,19 +1268,13 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                           <span className="text-slate-400 animate-pulse">{t.fetchingGps}</span>
                         ) : (
                           <span>
-                            Lat: <strong className="text-slate-800">{latitude?.toFixed(4) || '---'}</strong>, 
-                            Lng: <strong className="text-slate-800">{longitude?.toFixed(4) || '---'}</strong>
+                            Lat: <strong className="text-slate-800">{latitude?.toFixed(7) || '---'}</strong>, 
+                            Lng: <strong className="text-slate-800">{longitude?.toFixed(7) || '---'}</strong>
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
-
-                  {gpsFallbackUsed && (
-                    <div className="text-[10px] bg-amber-50 border border-amber-200 text-amber-800 px-2.5 py-1.5 rounded-lg max-w-sm">
-                      ⚡ {t.indoorHospitalRule}
-                    </div>
-                  )}
                 </div>
 
                 {/* Repeatable Samples distribution row */}

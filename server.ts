@@ -9,6 +9,9 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
+// Force Yemen Timezone for server-side timestamps
+process.env.TZ = 'Asia/Aden';
+
 // Load environment variables
 dotenv.config();
 
@@ -81,11 +84,16 @@ Analyze the following representative data:
 - Workplaces: ${JSON.stringify(workplaces)}
 - Recent Visits: ${JSON.stringify(visits)}
 
-Generate an optimized weekly plan in Arabic (fully RTL-friendly). It must:
+Generate an optimized weekly plan in Arabic (fully RTL-friendly). You must adhere to the Yemen timezone constraints and apply these medical visit requirements:
+- Class A requires 4 visits/month.
+- Class B requires 2-3 visits/month.
+- Class C requires 1 visit/month.
+
+It must:
 1. Cluster doctors by workplace proximity to minimize transit time.
-2. Prioritize Class A targets first (especially flagging any Class A who hasn't been visited in 14+ days - "Class A Neglect").
+2. Prioritize targets based on the class visit requirements (especially flagging any Class A neglect/under-coverage).
 3. Recommend specific days/shifts (Morning or Evening) to target specific neighborhood clusters.
-4. Flag deficiencies or gaps.
+4. Flag deficiencies or gaps and specify if a Doctor is below their monthly frequency.
 
 Output your plan as a clean Markdown string in beautiful Arabic language. Mention visual clusters, transit metrics, and actions clearly.
 `;
@@ -94,7 +102,7 @@ Output your plan as a clean Markdown string in beautiful Arabic language. Mentio
       model: 'gemini-1.5-flash',
       contents: payloadPrompt,
       config: {
-        systemInstruction: 'You are an SFA (Sales Force Automation) AI routing master who speaks Arabic fluently. Address the user respectfully.',
+        systemInstruction: 'You are an SFA (Sales Force Automation) AI routing master who speaks Arabic fluently. Address the user respectfully and operate in Yemen Time (UTC+3).',
       }
     });
 
@@ -141,10 +149,11 @@ app.post('/api/ai/doctor-analysis', async (req, res) => {
 Analyze the visit history of Doctor named "${doctorName}".
 Visits Data: ${JSON.stringify(visitsSorted)}
 
-Provide a structured, insightful AI/algorithmic analysis in Arabic. Explain:
-1. Average visit frequency (how many days between standard visits).
-2. Continuity pattern: Is the scheduling consistent or irregular?
-3. Actionable recommendation: How to detail this doctor in the next visit and how to optimize sample distribution to maintain class rating guidelines.
+Provide a structured, insightful AI/algorithmic analysis in Arabic. Use Yemen Time (Asia/Aden) for any temporal inferences. Explain:
+1. Average visit frequency.
+2. Continuity pattern.
+3. Compare against strict requirements: Class A requires 4 visits/month, Class B requires 2-3 visits/month, and Class C requires 1 visit/month. Detail how this doctor aligns with these targets.
+4. Actionable recommendation to optimize sample distribution and maintain their class rating.
 
 Output in beautiful Arabic formatted in clean Markdown.
 `;
@@ -153,7 +162,7 @@ Output in beautiful Arabic formatted in clean Markdown.
       model: 'gemini-1.5-flash',
       contents: payloadPrompt,
       config: {
-        systemInstruction: 'You are an SFA performance evaluation assistant. Provide objective, precise feedback in Arabic.',
+        systemInstruction: 'You are an SFA performance evaluation assistant operating in Yemen Time (UTC+3). Provide objective, precise feedback in Arabic.',
       }
     });
 

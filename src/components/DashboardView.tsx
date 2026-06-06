@@ -577,40 +577,6 @@ export default function DashboardView({ lang }: DashboardViewProps) {
         </div>
       </div>
 
-      {/* SFA KPIs Leaderboard & Motivation Scorecard */}
-      <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-5">
-        <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
-          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-            <Award className="w-5 h-5 text-indigo-500" />
-            {t.kpisLeaderboard}
-          </h3>
-          <span className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-2.5 py-1 rounded-md font-bold transition-colors">
-            {lang === 'ar' ? 'القطاع الرياض المركزي' : 'Central Riyadh Sector'}
-          </span>
-        </div>
-        
-        {/* Metric Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="bg-slate-50 border border-slate-100 p-5 rounded-xl text-center space-y-2">
-            <div className="text-[10px] text-slate-400 font-bold uppercase">{t.leaderRank}</div>
-            <div className="text-base font-extrabold text-slate-900 font-sans">
-              {userRank === 1 ? (lang === 'ar' ? 'المركز الأول 🥇' : '1st Place 🥇') :
-               userRank === 2 ? (lang === 'ar' ? 'المركز الثاني 🥈' : '2nd Place 🥈') :
-               userRank === 3 ? (lang === 'ar' ? 'المركز الثالث 🥉' : '3rd Place 🥉') :
-               (lang === 'ar' ? `المركز ${userRank}` : `Rank #${userRank}`)}
-            </div>
-            <div className="text-[9px] text-indigo-500 font-semibold">{lang === 'ar' ? 'المنطقة الوسطى' : 'Central Territory'}</div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-100 p-5 rounded-xl text-center space-y-2">
-            <div className="text-[10px] text-slate-400 font-bold uppercase">{t.leaderScore}</div>
-            <div className="text-base font-extrabold text-indigo-600 font-mono">
-              {calculatedScore} PTS
-            </div>
-            <div className="text-[9px] text-slate-400 font-semibold">{lang === 'ar' ? 'محتسب ديناميكياً' : 'Dynamically computed'}</div>
-          </div>
-        </div>
-      </div>
 
       {/* Class A physician neglect warning block */}
       {neglectedClassADocs.length > 0 && (

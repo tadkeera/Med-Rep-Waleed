@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { getInitialState, saveVirtualFile } from '../utils/db';
+import { getInitialState, saveVirtualFile, updateDoctor } from '../utils/db';
+import { Doctor } from '../types';
 import { FileText, Search, TrendingUp, Sparkles, Download, Printer, Calendar, Loader } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
@@ -31,6 +32,10 @@ export default function ReportsView({ lang }: ReportsViewProps) {
   // AI Analysis states
   const [aiAnalysisText, setAiAnalysisText] = useState<string | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
+
+  // Edit doctor modal
+  const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
+  const [editDocFields, setEditDocFields] = useState<Partial<Doctor>>({});
 
   useEffect(() => {
     setDb(getInitialState());
@@ -1062,6 +1067,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                     <th className="p-3 text-center">Class</th>
                     <th className="p-3 text-right">{lang === 'ar' ? 'مكان العمل الأول' : 'Workplace 1'}</th>
                     <th className="p-3 text-right">{lang === 'ar' ? 'مكان العمل الثاني' : 'Workplace 2'}</th>
+                    <th className="p-3 text-center">{lang === 'ar' ? 'الإجراءات' : 'Actions'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
@@ -1089,11 +1095,28 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                         </td>
                         <td className="p-3 text-slate-700 font-medium">{d.workplace1 || 'غير محدد'}</td>
                         <td className="p-3 text-slate-700 font-medium">{d.workplace2 || '------'}</td>
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => {
+                              setEditingDoctor(d);
+                              setEditDocFields({
+                                name: d.name,
+                                speciality: d.speciality,
+                                classRating: d.classRating,
+                                workplace1: d.workplace1,
+                                workplace2: d.workplace2
+                              });
+                            }}
+                            className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded text-[10px] font-bold"
+                          >
+                            {lang === 'ar' ? 'تعديل' : 'Edit'}
+                          </button>
+                        </td>
                       </tr>
                   ))}
                   {db.doctors.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-6 text-center text-slate-400">
+                      <td colSpan={7} className="p-6 text-center text-slate-400">
                         {lang === 'ar' ? 'لا توجد بيانات للأطباء' : 'No doctors found'}
                       </td>
                     </tr>
@@ -1103,6 +1126,86 @@ export default function ReportsView({ lang }: ReportsViewProps) {
             </div>
           </motion.div>
         ) : null}
+      </AnimatePresence>
+
+      {/* Edit Doctor Modal */}
+      <AnimatePresence>
+        {editingDoctor && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-white p-6 rounded-2xl max-w-sm w-full shadow-xl space-y-4"
+            >
+              <h3 className="font-bold text-slate-800 text-base border-b border-slate-100 pb-2">
+                {lang === 'ar' ? 'تعديل بيانات الطبيب' : 'Edit Doctor Details'}
+              </h3>
+              
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">{lang === 'ar' ? 'اسم الطبيب' : 'Doctor Name'}</label>
+                  <input
+                    type="text"
+                    value={editDocFields.name || ''}
+                    onChange={(e) => setEditDocFields({...editDocFields, name: e.target.value})}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">{lang === 'ar' ? 'التخصص' : 'Specialization'}</label>
+                  <input
+                    type="text"
+                    value={editDocFields.speciality || ''}
+                    onChange={(e) => setEditDocFields({...editDocFields, speciality: e.target.value})}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">{lang === 'ar' ? 'الكلاس' : 'Class Rating'}</label>
+                  <select
+                    value={editDocFields.classRating || 'C'}
+                    onChange={(e) => setEditDocFields({...editDocFields, classRating: e.target.value as 'A'|'B'|'C'})}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="A">Class A</option>
+                    <option value="B">Class B</option>
+                    <option value="C">Class C</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingDoctor(null)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-50 transition-colors"
+                >
+                  {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (editingDoctor && editDocFields.name?.trim()) {
+                      updateDoctor(editingDoctor.id, editDocFields);
+                      setDb(getInitialState());
+                      setEditingDoctor(null);
+                      alert(lang === 'ar' ? 'تم حفظ التعديلات بنجاح وتم تحديث السجلات المتعلقة.' : 'Changes saved successfully and related logs updated.');
+                    }
+                  }}
+                  className="px-4 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700 transition-colors"
+                >
+                  {lang === 'ar' ? 'حفظ التعديلات' : 'Save Changes'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );
