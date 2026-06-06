@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getInitialState, evaluateGuardrailAlarms, GuardrailAlarm } from '../utils/db';
-import { AlertTriangle, CheckCircle, TrendingUp, Calendar, Users, MapPin, Package, Award, Clock, Sun, AlertCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, TrendingUp, Calendar, Users, MapPin, Package, Award, Clock, Sun, AlertCircle, ArrowLeft, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface DashboardViewProps {
@@ -15,6 +15,7 @@ interface DashboardViewProps {
 export default function DashboardView({ lang }: DashboardViewProps) {
   const [db, setDb] = useState(getInitialState());
   const [alarms, setAlarms] = useState<GuardrailAlarm[]>([]);
+  const [subView, setSubView] = useState<'main' | 'stock' | 'security'>('main');
 
   useEffect(() => {
     // Reload database state
@@ -175,16 +176,73 @@ export default function DashboardView({ lang }: DashboardViewProps) {
   const productTotalVal = Object.values(productShares).reduce((acc, curr) => acc + curr, 0);
 
   // =====================================================================================
-  // تنبيهات المخزون التلقائية الذكية (حل النقطة 9)
+  // تنبيهات المخزون التلقائية الذكية (حل النقطة 9) تتبع الصلاحية وتفاصيل الدفعات
   // =====================================================================================
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  const batchExpiryDetails: {
+    sampleName: string;
+    invoiceNumber: string;
+    invoiceDate: string;
+    currentQuantity: number;
+    expiryDate: string;
+    status: 'expired' | 'critical' | 'normal';
+    daysDiff: number;
+  }[] = [];
+
+  const sparseStockList: {
+    sampleName: string;
+    currentQuantity: number;
+    invoiceNumber: string;
+    status: 'empty' | 'low';
+  }[] = [];
+
   const stockWarnings: string[] = [];
+
   db.invoices.forEach((inv) => {
     inv.items.forEach((it) => {
-      // 1. Low stock under 10
-      if (it.currentQuantity > 0 && it.currentQuantity < 10) {
-        const msg = t.lowStockMsg.replace('[NAME]', it.sampleName).replace('QTY', String(it.currentQuantity));
-        if (!stockWarnings.includes(msg)) {
-          stockWarnings.push(msg);
+      // 1. Quantity check (low stock under 10)
+      if (it.currentQuantity < 10) {
+        sparseStockList.push({
+          sampleName: it.sampleName,
+          currentQuantity: it.currentQuantity,
+          invoiceNumber: inv.invoiceNumber,
+          status: it.currentQuantity === 0 ? 'empty' : 'low'
+        });
+
+        if (it.currentQuantity > 0) {
+          const msg = t.lowStockMsg.replace('[NAME]', it.sampleName).replace('QTY', String(it.currentQuantity));
+          if (!stockWarnings.includes(msg)) {
+            stockWarnings.push(msg);
+          }
+        }
+      }
+
+      // 2. Expiry dates check
+      if (it.currentQuantity > 0 && it.expiryDate) {
+        const expDate = new Date(it.expiryDate);
+        expDate.setHours(0,0,0,0);
+        const diffTime = expDate.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        let expiryStatus: 'expired' | 'critical' | 'normal' = 'normal';
+        if (diffDays <= 0) {
+          expiryStatus = 'expired';
+        } else if (diffDays <= 60) {
+          expiryStatus = 'critical';
+        }
+
+        if (expiryStatus !== 'normal') {
+          batchExpiryDetails.push({
+            sampleName: it.sampleName,
+            invoiceNumber: inv.invoiceNumber,
+            invoiceDate: inv.invoiceDate,
+            currentQuantity: it.currentQuantity,
+            expiryDate: it.expiryDate,
+            status: expiryStatus,
+            daysDiff: diffDays
+          });
         }
       }
     });
@@ -260,6 +318,301 @@ export default function DashboardView({ lang }: DashboardViewProps) {
   }[targetingGrade as 'A+' | 'A' | 'B' | 'B-' | 'C'] || (lang === 'ar' ? 'تحت التقييم (C)' : 'Under Evaluation (C)');
 
   const dynamicStreak = Math.max(1, new Set(db.visits.map(v => v.visitDate.split('T')[0])).size);
+
+  const stockAlertsCount = sparseStockList.length + batchExpiryDetails.length;
+  const securityAlertsCount = alarms.length + neglectedClassADocs.length;
+
+  if (subView === 'stock') {
+    return (
+      <div className="space-y-6 fade-in text-right" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+        {/* Header with Back Button */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSubView('main')}
+              className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center w-10 h-10 shrink-0"
+              title={lang === 'ar' ? 'العودة للوحة التحكم الرئيسية' : 'Back to Dashboard'}
+            >
+              <ArrowRight className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 leading-tight">
+                {lang === 'ar' ? 'تنبيهات المخزون الذكي وصلاحية الدفعات' : 'Smart Stock & Batch Expiry Alerts'}
+              </h1>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                {lang === 'ar' 
+                  ? 'عرض تفصيلي لجميع الأدوية شحيحة المخزون وتواريخ الصلاحية وتتبع دفعات FIFO المنتهية أو القريبة من النفاد.'
+                  : 'FIFO batch tracking, low levels, and soon-to-expire pharmaceutical items.'}
+              </p>
+            </div>
+          </div>
+          <span className="bg-amber-50 text-amber-700 text-xs font-bold px-3 py-1.5 rounded-full border border-amber-100 self-start sm:self-center">
+            {lang === 'ar' ? 'متابعة الصلاحية (FIFO)' : 'FIFO Compliance Screen'}
+          </span>
+        </div>
+
+        {/* Overview Stats for Stock Alarm */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-slate-500 mb-1">{lang === 'ar' ? 'أصناف قاربت على النفاد / فارغة' : 'Low Stock Items (<10 units)'}</div>
+            <div className="text-3xl font-extrabold text-amber-655 font-mono">
+              {sparseStockList.length}
+            </div>
+          </div>
+          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-slate-500 mb-1">{lang === 'ar' ? 'دفعات منتهية الصلاحية كلياً' : 'Expired Batches'}</div>
+            <div className="text-3xl font-extrabold text-red-650 font-mono">
+              {batchExpiryDetails.filter(b => b.status === 'expired').length}
+            </div>
+          </div>
+          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-slate-500 mb-1">{lang === 'ar' ? 'دفعات تقترب من الانتهاء (60 يوم)' : 'Critical Batches (<60 days)'}</div>
+            <div className="text-3xl font-extrabold text-orange-550 font-mono">
+              {batchExpiryDetails.filter(b => b.status === 'critical').length}
+            </div>
+          </div>
+        </div>
+
+        {/* Section: Low Stock / Sparse Items list */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
+            <Package className="w-5 h-5 text-amber-500" />
+            {lang === 'ar' ? 'مستويات المخزون المنخفضة والأقسام الفارغة' : 'Low Stock & Depleted Quantities'}
+          </h3>
+
+          {sparseStockList.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
+              <CheckCircle className="w-8 h-8 text-emerald-500" />
+              <span className="font-semibold text-slate-700">{lang === 'ar' ? 'رائع! جميع مستويات المخزون آمنة وبكثرة.' : 'Splendid! All sample quantities are safe.'}</span>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-right text-slate-600">
+                <thead className="text-xs text-slate-500 bg-slate-50">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 text-right">{lang === 'ar' ? 'اسم الصنف' : 'Sample Name'}</th>
+                    <th scope="col" className="px-4 py-3 text-right">{lang === 'ar' ? 'الكمية الحالية' : 'Current Qty'}</th>
+                    <th scope="col" className="px-4 py-3 text-right">{lang === 'ar' ? 'رقم الفاتورة' : 'Invoice Ref'}</th>
+                    <th scope="col" className="px-4 py-3 text-right">{lang === 'ar' ? 'الحالة المعيارية' : 'Status'}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {sparseStockList.map((st, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-semibold text-slate-900">{st.sampleName}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-slate-850">{st.currentQuantity}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{st.invoiceNumber}</td>
+                      <td className="px-4 py-3">
+                        {st.currentQuantity === 0 ? (
+                          <span className="bg-red-50 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-100 inline-block">
+                            {lang === 'ar' ? 'نفذ بالكامل (0 علبة)' : 'Out of Stock'}
+                          </span>
+                        ) : (
+                          <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-105 inline-block">
+                            {lang === 'ar' ? 'منخفض وحرج' : 'Low Inventory'}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Section: Batch expirations detail list */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-red-500" />
+            {lang === 'ar' ? 'تنبيهات جرد صلاحية الدفعات (تاريخ الانتهاء)' : 'Batch Expiration Details & SFA Warnings'}
+          </h3>
+
+          {batchExpiryDetails.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
+              <CheckCircle className="w-8 h-8 text-emerald-500" />
+              <span className="font-semibold text-slate-700">{lang === 'ar' ? 'كل دفعات الأدوية المخزنة صالحة ولم تنته أو تقترب من النفاد.' : 'All pharmaceutical batches have safe shelf life.'}</span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {batchExpiryDetails.map((batch, idx) => (
+                <div 
+                  key={idx} 
+                  className={`p-4 rounded-xl border flex items-start gap-3.5 transition-all text-right ${
+                    batch.status === 'expired' 
+                      ? 'bg-red-50/40 border-red-150 text-slate-800' 
+                      : 'bg-amber-50/30 border-amber-150 text-slate-800'
+                  }`}
+                >
+                  <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${
+                    batch.status === 'expired' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-1 w-full">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-slate-900 text-xs sm:text-sm">{batch.sampleName}</span>
+                      <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${
+                        batch.status === 'expired' ? 'bg-red-200 text-red-850' : 'bg-amber-200/80 text-amber-850'
+                      }`}>
+                        {batch.status === 'expired' 
+                          ? (lang === 'ar' ? 'منتهية الصلاحية ❌' : 'Expired') 
+                          : (lang === 'ar' ? 'قاربت على الانتهاء ⚠️' : 'Expiring Soon')}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                      <span>{lang === 'ar' ? 'الفاتورة:' : 'Inv:'} <strong>{batch.invoiceNumber}</strong></span>
+                      <span>{lang === 'ar' ? 'الكمية المتضررة:' : 'Qty:'} <strong>{batch.currentQuantity} علبة</strong></span>
+                    </div>
+                    <div className="text-xs font-semibold text-slate-800 pt-2 border-t border-slate-100 mt-2 flex justify-between items-center">
+                      <span>{lang === 'ar' ? 'تاريخ الصلاحية:' : 'Expiry Date:'} <strong className="font-mono">{batch.expiryDate}</strong></span>
+                      <span className={`font-bold ${batch.status === 'expired' ? 'text-red-705' : 'text-amber-850'}`}>
+                        {batch.status === 'expired' 
+                          ? (lang === 'ar' ? `منته منذ ${Math.abs(batch.daysDiff)} يوم` : `Expired ${Math.abs(batch.daysDiff)} days ago`)
+                          : (lang === 'ar' ? `يتبقي ${batch.daysDiff} يوم فقط` : `${batch.daysDiff} days remaining`)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (subView === 'security') {
+    return (
+      <div className="space-y-6 fade-in text-right" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+        {/* Header with Back Button */}
+        <div className="bg-white border border-slate-150 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSubView('main')}
+              className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center w-10 h-10 shrink-0"
+              title={lang === 'ar' ? 'العودة للوحة التحكم الرئيسية' : 'Back to Dashboard'}
+            >
+              <ArrowRight className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 leading-tight">
+                {lang === 'ar' ? 'تنبيهات الأمان الذكية والرقابة الميدانية' : 'Smart Security & Field Compliance'}
+              </h1>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                {lang === 'ar' 
+                  ? 'رصد متقدم لمخالفات الـ GPS الجغرافي، التواقيت الزمنية للزيارات، التزييف الميداني، وإهمال الحسابات الهامة.'
+                  : 'Advanced tracking of GPS coordinates mismatch, ghost visits, late entries, and class neglect.'}
+              </p>
+            </div>
+          </div>
+          <span className="bg-red-50 text-red-700 text-xs font-bold px-3 py-1.5 rounded-full border border-red-150 self-start sm:self-center">
+            {lang === 'ar' ? 'بروتوكول الرقابة الذاتية' : 'SFA Compliance Shield'}
+          </span>
+        </div>
+
+        {/* Overview Row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex justify-between items-center">
+            <div>
+              <div className="text-xs text-slate-550 mb-1">{lang === 'ar' ? 'مخالفات السير والـ GPS والأصالة' : 'Activity Compliance Breaches'}</div>
+              <div className="text-3xl font-extrabold text-red-650 font-mono">{alarms.length}</div>
+            </div>
+            <div className="p-3 bg-red-100 text-red-600 rounded-xl shadow-xs">
+              <AlertTriangle className="w-6 h-6 animate-pulse" />
+            </div>
+          </div>
+          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex justify-between items-center">
+            <div>
+              <div className="text-xs text-slate-550 mb-1">{lang === 'ar' ? 'أطباء فئة (أ) مهملون بدون زيارة' : 'Neglected Class A Physicians (>14d)'}</div>
+              <div className="text-3xl font-extrabold text-amber-600 font-mono">{neglectedClassADocs.length}</div>
+            </div>
+            <div className="p-3 bg-amber-50 rounded-lg text-amber-600">
+              <Users className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+
+        {/* Section 1: GPS Compliance Violations (alarms) */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-red-500" />
+            {lang === 'ar' ? 'قائمة مخالفات الأمن والالتزام الجغرافي والزمني' : 'Enforcement Alarms & Activity Compliance Logs'}
+          </h3>
+
+          {alarms.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
+              <CheckCircle className="w-8 h-8 text-emerald-500" />
+              <span className="font-semibold text-slate-700">{lang === 'ar' ? 'سجل الرقابة خالٍ تماماً من المخالفات! العمل متطابق مع خطوط السير.' : 'Excellent work! No GPS coordinates or duration violations detected.'}</span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {alarms.map((alarm) => (
+                <div 
+                  key={alarm.id} 
+                  className="bg-white border-l-4 border-red-500 hover:border-red-650 text-slate-800 p-4 rounded-xl shadow-xs flex items-start gap-3.5 border border-slate-100 transition-all text-right"
+                >
+                  <div className="p-2 bg-red-100 text-red-700 rounded-lg shrink-0 mt-0.5">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-1 w-full">
+                    <div className="text-xs font-bold text-slate-950">
+                      {lang === 'ar' ? alarm.titleAr : alarm.titleEn}
+                    </div>
+                    <div className="text-xs leading-relaxed text-slate-550">
+                      {lang === 'ar' ? alarm.descriptionAr : alarm.descriptionEn}
+                    </div>
+                    <div className="pt-2 text-[10px] text-slate-400 font-semibold border-t border-slate-100 mt-2 flex items-center justify-between">
+                      <span>{lang === 'ar' ? 'الرمز التعريفي للمخالفة:' : 'Reference:'}</span>
+                      <span className="font-mono bg-slate-50 px-1.5 py-0.5 rounded text-slate-600">{alarm.id}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Section 2: Neglected Doctors Class A */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
+            <Users className="w-5 h-5 text-amber-500" />
+            {lang === 'ar' ? 'الأطباء فئة (أ) المهملون منذ أكثر من 14 يوماً' : 'Class A Doctors (>14 Days Without Visit)'}
+          </h3>
+
+          {neglectedClassADocs.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
+              <CheckCircle className="w-8 h-8 text-emerald-500" />
+              <span className="font-semibold text-slate-700">{lang === 'ar' ? 'عمل رائع ومستمر! تم تغطية جميع الأطباء المهمين فئة (أ) دورياً.' : 'Outstanding! All critical doctors have been visited recently.'}</span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {neglectedClassADocs.map((doc) => (
+                <div key={doc.id} className="bg-amber-50/20 border border-amber-100 rounded-xl p-4 space-y-2 text-right">
+                  <div className="flex items-center justify-between gap-2 border-b border-amber-50 pb-2">
+                    <span className="font-bold text-slate-800 text-sm">{doc.name}</span>
+                    <span className="bg-amber-100 text-amber-800 text-[10px] font-extrabold px-2 py-0.5 rounded">
+                      {lang === 'ar' ? 'فئة أ' : 'Class A'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-550 space-y-1">
+                    <div>{lang === 'ar' ? 'التخصص:' : 'Speciality:'} <strong className="text-slate-800">{doc.speciality}</strong></div>
+                    <div>{lang === 'ar' ? 'مقر العمل ١:' : 'Workplace 1:'} <span className="text-slate-550 font-medium">{doc.workplace1 || 'غير محدد'}</span></div>
+                    {doc.workplace2 && (
+                      <div>{lang === 'ar' ? 'مقر العمل ٢:' : 'Workplace 2:'} <span className="text-slate-550 font-medium">{doc.workplace2}</span></div>
+                    )}
+                  </div>
+                  <div className="pt-2 text-[10px] text-amber-800 font-bold leading-relaxed">
+                    🚨 {lang === 'ar' ? 'حرج: مضى أكثر من ١٤ يوماً من دون تسجيل زيارة تسويقية!' : 'Critical: More than 14 days passed since last detailing!'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 fade-in" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
@@ -376,6 +729,74 @@ export default function DashboardView({ lang }: DashboardViewProps) {
         )}
       </div>
 
+      {/* بوابات المتابعة والتنبيهات المتقدمة */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Portal Button 1: Stock alerts */}
+        <button
+          onClick={() => setSubView('stock')}
+          className="bg-white hover:bg-slate-50/40 border border-slate-100 hover:border-amber-200 rounded-2xl p-5 text-right transition-all group flex items-start gap-4 cursor-pointer relative shadow-xs"
+        >
+          <div className="absolute top-4 left-4 flex items-center gap-1.5">
+            {stockAlertsCount > 0 ? (
+              <span className="bg-amber-100 text-amber-700 text-[10px] sm:text-xs font-extrabold px-2.5 py-1 rounded-full animate-bounce">
+                {stockAlertsCount} {lang === 'ar' ? 'تنبيهات نشطة' : 'active alerts'}
+              </span>
+            ) : (
+              <span className="bg-emerald-50 text-emerald-600 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full">
+                ✔ {lang === 'ar' ? 'آمن كلياً' : 'Stock Secure'}
+              </span>
+            )}
+          </div>
+
+          <div className="p-3 bg-amber-50 group-hover:bg-amber-100 text-amber-600 rounded-xl transition-colors shrink-0">
+            <Package className="w-6 h-6" />
+          </div>
+          <div className="space-y-1.5 leading-tight">
+            <h3 className="font-bold text-slate-800 text-sm group-hover:text-amber-700 transition-colors">
+              {lang === 'ar' ? 'تنبيهات المخزون الذكي وصلاحية الدفعات' : 'Smart Stock & Expiry Alerts'}
+            </h3>
+            <p className="text-xs text-slate-500 leading-normal max-w-sm mt-1">
+              {lang === 'ar' 
+                ? 'استعراض النواقص الميدانية الفورية، تواريخ صلاحية عينات الأدوية المنتهية، والدفعات منتهية أو قاربت الانتهاء (حسب مبدأ FIFO).' 
+                : 'Display low sample stocks, expired item batches, and soon-to-expire FIFO slots.'}
+            </p>
+          </div>
+        </button>
+
+        {/* Portal Button 2: Security & Guardrail alerts */}
+        <button
+          onClick={() => setSubView('security')}
+          className="bg-white hover:bg-slate-50/40 border border-slate-100 hover:border-red-200 rounded-2xl p-5 text-right transition-all group flex items-start gap-4 cursor-pointer relative shadow-xs"
+        >
+          <div className="absolute top-4 left-4 flex items-center gap-1.5">
+            {securityAlertsCount > 0 ? (
+              <span className="bg-red-100 text-red-700 text-[10px] sm:text-xs font-extrabold px-2.5 py-1 rounded-full">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 animate-ping ml-1"></span>
+                {securityAlertsCount} {lang === 'ar' ? 'تنبيهات أمنية' : 'compliance notices'}
+              </span>
+            ) : (
+              <span className="bg-emerald-50 text-emerald-600 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full">
+                ✔ {lang === 'ar' ? 'عمل آمن ومثالي' : 'Fully Compliant'}
+              </span>
+            )}
+          </div>
+
+          <div className="p-3 bg-red-50 group-hover:bg-red-100 text-red-650 rounded-xl transition-colors shrink-0">
+            <AlertTriangle className="w-6 h-6 animate-pulse" />
+          </div>
+          <div className="space-y-1.5 leading-tight">
+            <h3 className="font-bold text-slate-800 text-sm group-hover:text-red-750 transition-colors">
+              {lang === 'ar' ? 'تنبيهات الأمان الذكية والرقابة الميدانية' : 'Smart Security & Field Compliance'}
+            </h3>
+            <p className="text-xs text-slate-550 leading-normal max-w-sm mt-1">
+              {lang === 'ar' 
+                ? 'مراقبة خطوط السير والالتزام الجغرافي بالـ GPS والمحطات الوهمية وتفادي إهمال الأطباء فئة (أ) الأكثر أهمية.' 
+                : 'Track GPS geofence compliance, timing alignment, phantom visits and neglected doctors.'}
+            </p>
+          </div>
+        </button>
+      </div>
+
       {/* Primary KPI Circular and Bar Charts */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Call Rate Compliance */}
@@ -480,56 +901,8 @@ export default function DashboardView({ lang }: DashboardViewProps) {
         </div>
       </div>
 
-      {/* Intelligent Stock Warnings & Expiration Block (حل النقطة 9) */}
-      {stockWarnings.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3">
-          <h4 className={`font-bold text-amber-900 text-sm flex items-center gap-2 ${lang === 'ar' ? 'flex-row' : 'flex-row-reverse'}`}>
-            <Package className="w-5 h-5 text-amber-600 shrink-0" />
-            {t.stockWarnings}
-          </h4>
-          <ul className="text-xs text-amber-800 space-y-1.5 list-disc list-inside">
-            {stockWarnings.map((warning, index) => (
-              <li key={index} className="font-semibold">{warning}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {/* Class Ratings and Focus share reports */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Product share bar lists */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
-          <h3 className="font-semibold text-slate-800 text-sm border-b border-slate-50 pb-2 flex items-center gap-2">
-            <Package className="w-4 h-4 text-emerald-500" />
-            {t.kpiFocus}
-          </h3>
-          {sortedProducts.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-400">
-              {lang === 'ar' ? 'لا توجد هدايا عينات منشورة لبيان مساهمة المنتجات' : 'No sample distribution logs found.'}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {sortedProducts.map(([name, qty]) => {
-                const percent = productTotalVal > 0 ? Math.round((qty / productTotalVal) * 100) : 0;
-                return (
-                  <div key={name} className="space-y-1.5">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-medium text-slate-700">{name}</span>
-                      <span className="font-semibold text-slate-950 font-mono">{qty} وحدة ({percent}%)</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                      <div 
-                        className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${percent}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
         {/* Class Ratings Breakdown */}
         <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
           <h3 className="font-semibold text-slate-800 text-sm border-b border-slate-50 pb-2 flex items-center gap-2">
@@ -643,61 +1016,6 @@ export default function DashboardView({ lang }: DashboardViewProps) {
             </svg>
           </div>
         </div>
-      </div>
-
-
-      {/* Class A physician neglect warning block */}
-      {neglectedClassADocs.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3">
-          <h4 className="font-semibold text-amber-900 text-sm flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-            {t.neglectedAccounts}
-          </h4>
-          <ul className="text-xs text-amber-800 space-y-1.5 list-disc list-inside">
-            {neglectedClassADocs.map((d) => (
-              <li key={d.id} className="font-medium">
-                {d.name} <span className="text-slate-500">[{d.speciality}]</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Smart Guardrail alerts in RED */}
-      <div className="bg-red-50/40 border border-red-100 rounded-2xl p-5 space-y-4">
-        <h3 className="font-bold text-red-900 text-sm flex items-center gap-2">
-          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 animate-pulse" />
-          {t.redAlerts}
-        </h3>
-        
-        {alarms.length === 0 ? (
-          <p className="text-xs text-slate-500 italic py-2 flex items-center gap-1.5">
-            <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
-            {t.noAlarms}
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {alarms.map((alarm) => (
-              <motion.div 
-                whileHover={{ scale: 1.01 }}
-                key={alarm.id} 
-                className="bg-white border-l-4 border-red-500 hover:border-red-600 text-slate-800 p-3.5 rounded-xl shadow-xs flex items-start gap-3 border border-slate-100 transition-all text-right"
-              >
-                <div className="p-1.5 bg-red-100 text-red-700 rounded-lg shrink-0 mt-0.5">
-                  <AlertTriangle className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-red-950">
-                    {lang === 'ar' ? alarm.titleAr : alarm.titleEn}
-                  </div>
-                  <div className="text-[11px] leading-relaxed text-slate-500">
-                    {lang === 'ar' ? alarm.descriptionAr : alarm.descriptionEn}
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
