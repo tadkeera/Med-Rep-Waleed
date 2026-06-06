@@ -286,7 +286,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
 </body>
 </html>
       `;
-    } else {
+    } else if (reportType === 'doctor') {
       docTitle = `report_doctor_${selectedDoctor.replace(/\s+/g, '_')}`;
       exportHtml = `
 <!DOCTYPE html>
@@ -327,6 +327,107 @@ export default function ReportsView({ lang }: ReportsViewProps) {
           <td>${v.notes || '-'}</td>
         </tr>
       `).join('') : `<tr><td colspan="3" style="text-align: center; color: #94a3b8;">${lang === 'ar' ? 'لم يسجل زيارات في هذه الفترة' : 'No records.'}</td></tr>`}
+    </tbody>
+  </table>
+</body>
+</html>
+      `;
+    } else if (reportType === 'visitsLog') {
+      docTitle = `report_visits_log_${dateFrom}_${dateTo}`;
+      exportHtml = `
+<!DOCTYPE html>
+<html dir="${lang === 'ar' ? 'rtl' : 'ltr'}" lang="${lang}">
+<head>
+  <meta charset="UTF-8">
+  <title>${lang === 'ar' ? 'سجل الزيارات الموثق' : 'Audited Visits Ledger'}</title>
+  <style>
+    body { font-family: 'Arial', sans-serif; padding: 25px; color: #1e293b; background: #fff; }
+    h1 { color: #0f766e; margin-top: 0; padding-bottom: 10px; font-size: 20px; border-bottom: 2px solid #14b8a6; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th { background: #14b8a6; color: white; padding: 10px; font-size: 12px; text-align: ${lang === 'ar' ? 'right' : 'left'}; }
+    td { padding: 10px; border: 1px solid #e2e8f0; font-size: 11px; }
+    tr:nth-child(even) { background: #f0fdfa; }
+  </style>
+</head>
+<body>
+  ${logoImgTag}
+  <h1>${lang === 'ar' ? 'سجل الزيارات الموثق' : 'Audited Visits Ledger'}</h1>
+  <p style="font-size: 12px; color: #64748b;">${lang === 'ar' ? 'الفترة:' : 'Period:'} ${dateFrom} - ${dateTo}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>${lang === 'ar' ? 'العميل' : 'Client'}</th>
+        <th>${lang === 'ar' ? 'التاريخ والوقت' : 'Date & Time'}</th>
+        <th>${lang === 'ar' ? 'مكان العمل' : 'Workplace'}</th>
+        <th>${lang === 'ar' ? 'العينات المصروفة' : 'Samples'}</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${filteredVisitsLog.map(v => `
+        <tr>
+          <td><strong>${v.doctorName || 'External'}</strong><br><span style="color:#64748b; font-size:10px;">${v.clientType}</span></td>
+          <td>${v.visitDate} ${v.checkInTime ? ' ' + v.checkInTime.substring(11, 16) : ''}</td>
+          <td>${v.workplaceName}</td>
+          <td>
+             ${v.samples.length > 0 ? v.samples.map(s => `${s.sampleName} (${s.quantityDistributed})`).join('<br>') : '-'}
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+</body>
+</html>
+      `;
+    } else if (reportType === 'doctorsList' as any) {
+      docTitle = `report_doctors_list`;
+      const docsToPrint = db.doctors
+        .filter((d) => !doctorListClassFilter || d.classRating === doctorListClassFilter)
+        .filter((d) => !doctorListSpecFilter || d.speciality?.toLowerCase().includes(doctorListSpecFilter.toLowerCase()))
+        .filter((d) => {
+          if (!doctorListWorkplaceFilter) return true;
+          const q = doctorListWorkplaceFilter.toLowerCase();
+          return (d.workplace1?.toLowerCase().includes(q) || d.workplace2?.toLowerCase().includes(q));
+        });
+      exportHtml = `
+<!DOCTYPE html>
+<html dir="${lang === 'ar' ? 'rtl' : 'ltr'}" lang="${lang}">
+<head>
+  <meta charset="UTF-8">
+  <title>${lang === 'ar' ? 'قائمة الأطباء' : 'Doctors List'}</title>
+  <style>
+    body { font-family: 'Arial', sans-serif; padding: 25px; color: #1e293b; background: #fff; }
+    h1 { color: #be185d; margin-top: 0; padding-bottom: 10px; font-size: 20px; border-bottom: 2px solid #f43f5e; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th { background: #f43f5e; color: white; padding: 10px; font-size: 12px; text-align: ${lang === 'ar' ? 'right' : 'left'}; }
+    td { padding: 10px; border: 1px solid #e2e8f0; font-size: 11px; }
+    tr:nth-child(even) { background: #fff1f2; }
+  </style>
+</head>
+<body>
+  ${logoImgTag}
+  <h1>${lang === 'ar' ? 'قائمة الأطباء المعتمدة' : 'Approved Doctors List'}</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>${lang === 'ar' ? 'الاسم' : 'Name'}</th>
+        <th>${lang === 'ar' ? 'التخصص' : 'Specialization'}</th>
+        <th>Class</th>
+        <th>${lang === 'ar' ? 'مكان العمل 1' : 'Workplace 1'}</th>
+        <th>${lang === 'ar' ? 'مكان العمل 2' : 'Workplace 2'}</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${docsToPrint.map((d, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${d.name}</strong></td>
+          <td>${d.speciality}</td>
+          <td>${d.classRating}</td>
+          <td>${d.workplace1 || '-'}</td>
+          <td>${d.workplace2 || '-'}</td>
+        </tr>
+      `).join('')}
     </tbody>
   </table>
 </body>

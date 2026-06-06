@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getInitialState, evaluateGuardrailAlarms, GuardrailAlarm } from '../utils/db';
-import { AlertTriangle, CheckCircle, TrendingUp, Calendar, Users, MapPin, Package, Award, Clock } from 'lucide-react';
+import { AlertTriangle, CheckCircle, TrendingUp, Calendar, Users, MapPin, Package, Award, Clock, Sun, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface DashboardViewProps {
@@ -119,7 +119,7 @@ export default function DashboardView({ lang }: DashboardViewProps) {
     return vDate >= startOfWeekDate;
   });
 
-  const targetCallRate = 8;
+  const targetCallRate = 60;
   const actualCallRate = visitsThisWeek.length;
   const callRatePct = Math.min(Math.round((actualCallRate / targetCallRate) * 100), 100);
 
@@ -200,6 +200,29 @@ export default function DashboardView({ lang }: DashboardViewProps) {
     }
   });
   const totalClassVisits = classVisits.A + classVisits.B + classVisits.C;
+
+  // =====================================================================================
+  // Daily Achievement & Smart Notifications
+  // =====================================================================================
+  const todayDateString = new Date().toISOString().split('T')[0];
+  const todayDayNameEN = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  const todayPlan = activeCycle?.plans.find(p => p.day === todayDayNameEN);
+  
+  const visitsTodayList = db.visits.filter(v => v.visitDate.startsWith(todayDateString));
+  const visitsTodayCount = visitsTodayList.length;
+  const workplacesVisitedToday = new Set(visitsTodayList.map(v => v.workplaceName)).size;
+  
+  let todayScheduledWorkplacesCount = 0;
+  let todayScheduledNames: string[] = [];
+  if(todayPlan) {
+      const scheduledSet = new Set<string>();
+      todayPlan.morning.workplaces.forEach(w => { if(w.trim()) scheduledSet.add(w.trim()) });
+      todayPlan.evening.workplaces.forEach(w => { if(w.trim()) scheduledSet.add(w.trim()) });
+      todayScheduledWorkplacesCount = scheduledSet.size;
+      todayScheduledNames = Array.from(scheduledSet);
+  }
+  
+  const remainingPlanToday = Math.max(0, todayScheduledWorkplacesCount - workplacesVisitedToday);
 
   // Representative Name
   const repName = localStorage.getItem('medrep_representative_name') || (lang === 'ar' ? 'وليد فريد' : 'Waleed Fareed');
@@ -306,6 +329,51 @@ export default function DashboardView({ lang }: DashboardViewProps) {
             <div className="text-xl font-bold text-slate-800">{activeDoctors}</div>
           </div>
         </div>
+      </div>
+
+      {/* Daily Achievement & Smart Notifications */}
+      <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-6 shadow-md text-white relative overflow-hidden">
+        <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="space-y-1">
+            <h3 className="font-bold text-lg flex items-center gap-2">
+              <Sun className="w-5 h-5 text-yellow-300" />
+              {lang === 'ar' ? 'إنجاز اليوم' : 'Today\'s Achievement'}
+            </h3>
+            <p className="text-white/80 text-sm">
+              {lang === 'ar' ? 'تذكير ذكي: الزيارات المجدولة لهذا اليوم.' : 'Smart Notification: Scheduled routes for today.'}
+            </p>
+          </div>
+          
+          <div className="flex bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 gap-6">
+            <div className="text-center">
+              <div className="text-xs text-indigo-100 mb-1">{lang === 'ar' ? 'الزيارات المكتملة' : 'Visits Completed'}</div>
+              <div className="text-2xl font-bold">{visitsTodayCount}</div>
+            </div>
+            <div className="w-px bg-white/20"></div>
+            <div className="text-center">
+              <div className="text-xs text-indigo-100 mb-1">{lang === 'ar' ? 'المواقع المزارة' : 'Places Visited'}</div>
+              <div className="text-2xl font-bold">{workplacesVisitedToday}</div>
+            </div>
+            <div className="w-px bg-white/20"></div>
+            <div className="text-center">
+              <div className="text-xs text-indigo-100 mb-1">{lang === 'ar' ? 'المتبقي من الخطة' : 'Remaining To Do'}</div>
+              <div className="text-2xl font-bold">{remainingPlanToday}</div>
+            </div>
+          </div>
+        </div>
+
+        {todayScheduledNames.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-white/10">
+            <div className="flex items-center gap-2 text-sm text-white/90">
+              <AlertCircle className="w-4 h-4 text-emerald-300 shrink-0" />
+              <span>
+                 {lang === 'ar' ? 'المواقع المجدولة لك اليوم:' : 'Scheduled Workplaces Today:'}
+                 <strong className="mx-1">{todayScheduledNames.join('، ')}</strong>
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Primary KPI Circular and Bar Charts */}

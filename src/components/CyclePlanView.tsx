@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { getInitialState, saveState, saveVirtualFile } from '../utils/db';
 import { WeeklyCycle, DailyCyclePlan } from '../types';
-import { Calendar, Building, Plus, Trash, Check, Download, FileText, ArrowLeftRight } from 'lucide-react';
+import { Calendar, Building, Plus, Trash, Check, Download, FileText, ArrowLeftRight, Printer, Sun, Moon, MapPin, Sparkles } from 'lucide-react';
 
 interface CyclePlanViewProps {
   lang: 'ar' | 'en';
@@ -155,45 +155,202 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
   };
 
   // Writing full export simulation payload reports to download directories
-  const handleExportPlanDocument = () => {
+  const handleExportPlanDocument = (format: 'html' | 'print') => {
     // Generate styled HTML structure for offline share
     const exportHtml = `
 <!DOCTYPE html>
 <html dir="${lang === 'ar' ? 'rtl' : 'ltr'}" lang="${lang}">
 <head>
   <meta charset="UTF-8">
-  <title>خطة السير الأسبوعية المعتمدة - ${repName}</title>
+  <title>الخطة الاسبوعية - ${repName}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; color: #1e293b; background: #f8fafc; }
-    .header { text-align: center; margin-bottom: 25px; border-bottom: 3px double #e2e8f0; padding-bottom: 15px; }
-    .header h1 { margin: 0; color: #0f172a; font-size: 24px; }
-    .header p { margin: 5px 0 0 0; color: #64748b; font-size: 14px; }
-    .metadata-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .metadata-table td { padding: 12px; border: 1px solid #e2e8f0; font-size: 13px; }
-    .metadata-table td.label { font-weight: bold; background: #f1f5f9; width: 25%; }
-    .plan-grid { width: 100%; border-collapse: collapse; background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .plan-grid th { padding: 14px; background: #1e293b; color: #ffffff; text-align: right; border: 1px solid #334155; font-size: 14px; }
-    .plan-grid td { padding: 14px; border: 1px solid #e2e8f0; vertical-align: top; font-size: 13px; }
-    .plan-grid td.day { font-weight: bold; background: #f8fafc; text-align: center; width: 120px; }
-    .workplace-pill { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 4px 10px; border-radius: 4px; display: inline-block; margin: 3px; font-size: 12px; }
-    .footer { text-align: center; margin-top: 30px; font-size: 11px; color: #94a3b8; }
+    @page {
+      size: A4 portrait;
+      margin: 8mm;
+    }
+    body {
+      font-family: 'Cairo', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 10px;
+      margin: 0;
+      color: #1e293b;
+      background-color: #ffffff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .header {
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      color: #ffffff;
+      padding: 14px 20px;
+      border-radius: 12px;
+      text-align: center;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.1);
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+    }
+    .metadata-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin-bottom: 12px;
+      background: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
+    }
+    .metadata-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 12px;
+      color: #334155;
+      font-weight: 600;
+    }
+    .metadata-table td.label {
+      font-weight: 700;
+      background: #f8fafc;
+      width: 20%;
+      color: #475569;
+      border-left: 1px solid #e2e8f0;
+    }
+    .plan-grid {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      background: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
+    }
+    .plan-grid th {
+      padding: 10px 12px;
+      background: #f8fafc;
+      color: #1e293b;
+      text-align: right;
+      font-size: 12.5px;
+      font-weight: 800;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .plan-grid td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: top;
+      font-size: 11.5px;
+    }
+    .plan-grid td.day {
+      font-weight: 800;
+      background: #f8fafc;
+      text-align: center;
+      width: 110px;
+      border-left: 1px solid #e2e8f0;
+      vertical-align: middle;
+    }
+    .day-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .day-name {
+      background: #ffffff;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      color: #0f172a;
+      font-weight: 700;
+      font-size: 12px;
+      width: 80px;
+      display: inline-block;
+      text-align: center;
+    }
+    .day-sub {
+      font-size: 9px;
+      color: #94a3b8;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .workplace-pill {
+      background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+      border: 1px solid #cbd5e1;
+      padding: 4px 8px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin: 3px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #1e293b;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    }
+    .empty-state {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      font-style: italic;
+      font-weight: 600;
+      font-size: 11px;
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      padding: 6px 12px;
+      border-radius: 8px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .icon {
+      width: 14px;
+      height: 14px;
+      vertical-align: middle;
+      display: inline-block;
+    }
+    .header-icon {
+      width: 16px;
+      height: 16px;
+      vertical-align: middle;
+      display: inline-block;
+    }
+    .header-content {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    @media print {
+      body { padding: 0; background-color: #ffffff; }
+      .header { box-shadow: none; background: #6366f1 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .plan-grid { box-shadow: none; }
+      .metadata-table { box-shadow: none; }
+      .workplace-pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .no-print { display: none !important; }
+    }
   </style>
 </head>
 <body>
+  <div class="no-print" style="margin-bottom: 15px; display: flex; justify-content: flex-end;">
+    <button onclick="window.print();" style="background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; border: none; padding: 8px 18px; border-radius: 8px; font-weight: bold; cursor: pointer; font-family: 'Cairo', sans-serif; font-size: 13px; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);">
+      <span>🖨️ طباعة وحفظ PDF ملون</span>
+    </button>
+  </div>
+
   <div class="header">
-    <h1>خطة السير الأسبوعية المعتمدة (SFA Cycle Plan)</h1>
-    <p>تم استخراج المستند آلياً من نظام Med Rep لمندوبي الدعاية الميدانية</p>
+    <h1>الخطة الاسبوعية</h1>
   </div>
 
   <table class="metadata-table">
     <tr>
       <td class="label">اسم المندوب:</td>
       <td>${repName}</td>
-      <td class="label">تاريخ خط السير:</td>
+      <td class="label">التاريخ:</td>
       <td>من ${dateFrom} إلى ${dateTo}</td>
     </tr>
     <tr>
-      <td class="label">الشركة الراعية:</td>
+      <td class="label">الشركة:</td>
       <td colspan="3">${companyName}</td>
     </tr>
   </table>
@@ -201,45 +358,84 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
   <table class="plan-grid">
     <thead>
       <tr>
-        <th>اليوم الميداني</th>
-        <th>النوبة الصباحية (Morning Shift)</th>
-        <th>النوبة المسائية (Evening Shift)</th>
+        <th>اليوم</th>
+        <th>
+          <div class="header-content">
+            <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+            الفترة الصباحية
+          </div>
+        </th>
+        <th>
+          <div class="header-content">
+            <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px;"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+            الفترة المسائية
+          </div>
+        </th>
       </tr>
     </thead>
     <tbody>
-      ${plans.map(p => `
+      ${plans.map((p, idxDay) => `
         <tr>
-          <td class="day">${DAYS_OF_WEEK.daysAr[p.day as keyof typeof DAYS_OF_WEEK.daysAr] || p.day}</td>
-          <td>
-            ${p.morning.workplaces.length === 0 ? '<i>نوبة خفيفة / مكتبية</i>' : p.morning.workplaces.map(w => `<span class="workplace-pill">${w}</span>`).join('')}
+          <td class="day">
+            <div class="day-wrapper">
+              <span class="day-name">${DAYS_OF_WEEK.daysAr[p.day as keyof typeof DAYS_OF_WEEK.daysAr] || p.day}</span>
+              <span class="day-sub">${p.day.substring(0, 3).toUpperCase()} • اليوم ${idxDay + 1}</span>
+            </div>
           </td>
           <td>
-            ${p.evening.workplaces.length === 0 ? '<i>نوبة خفيفة / مكتبية</i>' : p.evening.workplaces.map(w => `<span class="workplace-pill">${w}</span>`).join('')}
+            ${p.morning.workplaces.length === 0 ? `
+              <div class="empty-state">نوبة خفيفة / صفر</div>
+            ` : p.morning.workplaces.map(w => `
+              <span class="workplace-pill">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: #6366f1; margin-left: 4px;"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                ${w}
+              </span>
+            `).join('')}
+          </td>
+          <td>
+            ${p.evening.workplaces.length === 0 ? `
+              <div class="empty-state">نوبة خفيفة / صفر</div>
+            ` : p.evening.workplaces.map(w => `
+              <span class="workplace-pill">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: #6366f1; margin-left: 4px;"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                ${w}
+              </span>
+            `).join('')}
           </td>
         </tr>
       `).join('')}
     </tbody>
   </table>
-
-  <div class="footer">
-    Med Rep SFA Engine Pro Version 1.0 (Offline-First CRM Systems)
-  </div>
 </body>
 </html>
 `;
 
-    // Save as dynamic virtual file
-    const fileName = `weekly_cycle_${dateFrom}_to_${dateTo}.html`;
-    saveVirtualFile({
-      name: fileName,
-      size: `${(exportHtml.length / 1024).toFixed(1)} KB`,
-      dateModified: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      folder: 'DOWNLOAD',
-      content: exportHtml,
-      type: 'html'
-    });
-
-    alert(t.exportSuccess);
+    if (format === 'html') {
+      const fileName = `weekly_cycle_${dateFrom}_to_${dateTo}.html`;
+      saveVirtualFile({
+        name: fileName,
+        size: `${(exportHtml.length / 1024).toFixed(1)} KB`,
+        dateModified: new Date().toISOString().replace('T', ' ').substring(0, 16),
+        folder: 'DOWNLOAD',
+        content: exportHtml,
+        type: 'html'
+      });
+      alert(t.exportSuccess);
+    } else if (format === 'print') {
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        // Embed auto-print trigger cleanly at the end of the premium HTML page
+        const printablePayload = exportHtml.replace('</body>', `
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 400);
+            }
+          <\/script>
+        </body>`);
+        printWindow.document.write(printablePayload);
+        printWindow.document.close();
+      }
+    }
   };
 
   return (
@@ -272,11 +468,19 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
           </button>
           <button
             type="button"
-            onClick={handleExportPlanDocument}
+            onClick={() => handleExportPlanDocument('html')}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shadow-indigo-500/10 cursor-pointer"
           >
             <Download className="w-4 h-4" />
             {t.exportPlan}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportPlanDocument('print')}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shadow-emerald-500/10 cursor-pointer"
+          >
+            <Printer className="w-4 h-4" />
+            {lang === 'ar' ? 'طباعة وحفظ PDF ملون' : 'Print / Save PDF'}
           </button>
         </div>
       </div>
@@ -333,35 +537,62 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
       </div>
 
       {/* Interactive Grid System */}
-      <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+      <div className="bg-white border border-slate-100/90 rounded-2xl overflow-hidden shadow-md">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-right md:text-right">
             <thead>
-              <tr className="bg-slate-900 text-white border-b border-slate-800">
-                <th className="px-5 py-4 text-xs font-bold text-slate-200 w-32 border-l border-slate-800 text-center">{t.dayCol}</th>
-                <th className="px-5 py-4 text-xs font-bold text-slate-200">{t.morningShift}</th>
-                <th className="px-5 py-4 text-xs font-bold text-slate-200">{t.eveningShift}</th>
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-700">
+                <th className="px-6 py-5 text-xs font-bold text-slate-500 w-44 text-center border-l border-slate-100/80 bg-slate-50/50">
+                  <div className="flex items-center justify-center gap-1.5 font-bold">
+                    <Calendar className="w-4 h-4 text-indigo-500" />
+                    <span>{t.dayCol}</span>
+                  </div>
+                </th>
+                <th className="px-6 py-5 text-xs font-bold text-slate-500 border-l border-slate-100/60">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg text-[10px] font-extrabold flex items-center justify-center gap-1 shadow-sm">
+                      <Sun className="w-4 h-4" />
+                      <span>{lang === 'ar' ? 'الفترة الصباحية' : 'Morning'}</span>
+                    </div>
+                    <span className="text-slate-800 font-extrabold text-sm">{t.morningShift}</span>
+                  </div>
+                </th>
+                <th className="px-6 py-5 text-xs font-bold text-slate-500">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-extrabold flex items-center justify-center gap-1 shadow-sm">
+                      <Moon className="w-4 h-4" />
+                      <span>{lang === 'ar' ? 'الفترة المسائية' : 'Evening'}</span>
+                    </div>
+                    <span className="text-slate-800 font-extrabold text-sm">{t.eveningShift}</span>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {plans.map((p) => (
-                <tr key={p.day} className="hover:bg-slate-50/40 transition-colors">
-                  {/* Day cell */}
-                  <td className="px-5 py-5 font-bold text-slate-950 text-xs text-center bg-slate-50/50 border-l border-slate-100 divide-y-5 flex flex-col justify-center items-center gap-1.5 min-h-[140px]">
-                    <span className="text-slate-800 text-sm">
-                      {lang === 'ar' ? DAYS_OF_WEEK.daysAr[p.day as keyof typeof DAYS_OF_WEEK.daysAr] : p.day}
-                    </span>
-                    <span className="text-[9px] text-slate-400 font-mono tracking-wide">{p.day.substring(0, 3).toUpperCase()}</span>
+              {plans.map((p, idxDay) => (
+                <tr key={p.day} className="hover:bg-slate-50/30 transition-colors">
+                  {/* Day cell with clean numbers */}
+                  <td className="px-6 py-6 font-bold text-slate-950 text-xs text-center bg-slate-50/25 border-l border-slate-100/80 min-w-[140px]">
+                    <div className="flex flex-col items-center justify-center gap-1.5">
+                      <span className="bg-white px-4 py-2 rounded-xl border border-slate-200/50 shadow-sm text-slate-800 font-bold text-sm tracking-tight w-28 block text-center">
+                        {lang === 'ar' ? DAYS_OF_WEEK.daysAr[p.day as keyof typeof DAYS_OF_WEEK.daysAr] : p.day}
+                      </span>
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 font-mono tracking-wider">
+                        <span>{p.day.substring(0, 3).toUpperCase()}</span>
+                        <span>•</span>
+                        <span>{lang === 'ar' ? `اليوم ${idxDay + 1}` : `Day ${idxDay + 1}`}</span>
+                      </div>
+                    </div>
                   </td>
 
                   {/* Morning Shift input & list */}
-                  <td className="px-5 py-5 vertical-align-top space-y-4">
+                  <td className="px-6 py-6 vertical-align-top space-y-4 border-l border-slate-100/60">
                     {/* Inline add workspace */}
-                    <div className="flex gap-1.5 max-w-sm">
+                    <div className="flex gap-2 max-w-md items-center">
                       <input
                         type="text"
                         placeholder={t.addPlaceholder}
-                        className="flex-1 bg-slate-50 focus:bg-white border border-slate-250 focus:border-indigo-500 rounded-lg px-2.5 py-1.5 text-xs outline-none font-medium text-slate-800"
+                        className="flex-1 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-xl px-3.5 py-2 text-xs outline-none font-medium text-slate-800 transition-all shadow-inner"
                         value={inputMap[`${p.day}-morning`] || ''}
                         onChange={(e) => setInputMap({ ...inputMap, [`${p.day}-morning`]: e.target.value })}
                         onKeyDown={(e) => e.key === 'Enter' && handleAddWorkplace(p.day, 'morning')}
@@ -369,7 +600,8 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
                       <button
                         type="button"
                         onClick={() => handleAddWorkplace(p.day, 'morning')}
-                        className="px-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
+                        className="p-2 py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white rounded-xl border border-indigo-100 transition-all cursor-pointer flex items-center justify-center shadow-sm font-bold"
+                        title={t.addBtn}
                       >
                         <Plus className="w-4 h-4" />
                       </button>
@@ -378,16 +610,24 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
                     {/* Workplaces display list */}
                     <div className="space-y-1.5">
                       {p.morning.workplaces.length === 0 ? (
-                        <div className="text-[10px] text-slate-400 italic font-medium">{t.emptyShift}</div>
+                        <div className="flex flex-col items-center justify-center py-5 px-4 border border-dashed border-slate-200 rounded-xl bg-slate-50/30 text-center select-none text-slate-400/80 max-w-md">
+                          <Sparkles className="w-4 h-4 text-slate-300 mb-1" />
+                          <span className="text-[10px] font-semibold leading-normal">{t.emptyShift}</span>
+                        </div>
                       ) : (
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-2 max-w-md">
                           {p.morning.workplaces.map((work, idx) => (
-                            <div key={idx} className="bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-                              <span>{work}</span>
+                            <div 
+                              key={idx} 
+                              className="group/pill inline-flex items-center gap-1.5 bg-gradient-to-r from-slate-50 to-slate-100 hover:from-white hover:to-white border border-slate-250 hover:border-indigo-400 hover:shadow-sm transition-all duration-200 px-3 py-1.5 rounded-xl select-none"
+                            >
+                              <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                              <span className="text-slate-800 text-xs font-bold">{work}</span>
                               <button
                                 type="button"
                                 onClick={() => handleRemoveWorkplace(p.day, 'morning', idx)}
-                                className="text-slate-400 hover:text-red-500 rounded-sm cursor-pointer"
+                                className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-0.5 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center font-bold text-sm w-4 h-4 ml-0.5"
+                                title={lang === 'ar' ? 'حذف من خط السير' : 'Remove workplace'}
                               >
                                 ×
                               </button>
@@ -399,12 +639,12 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
                   </td>
 
                   {/* Evening Shift input & list */}
-                  <td className="px-5 py-5 vertical-align-top space-y-4">
-                    <div className="flex gap-1.5 max-w-sm">
+                  <td className="px-6 py-6 vertical-align-top space-y-4">
+                    <div className="flex gap-2 max-w-md items-center">
                       <input
                         type="text"
                         placeholder={t.addPlaceholder}
-                        className="flex-1 bg-slate-50 focus:bg-white border border-slate-250 focus:border-indigo-500 rounded-lg px-2.5 py-1.5 text-xs outline-none font-medium text-slate-800"
+                        className="flex-1 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-xl px-3.5 py-2 text-xs outline-none font-medium text-slate-800 transition-all shadow-inner"
                         value={inputMap[`${p.day}-evening`] || ''}
                         onChange={(e) => setInputMap({ ...inputMap, [`${p.day}-evening`]: e.target.value })}
                         onKeyDown={(e) => e.key === 'Enter' && handleAddWorkplace(p.day, 'evening')}
@@ -412,7 +652,8 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
                       <button
                         type="button"
                         onClick={() => handleAddWorkplace(p.day, 'evening')}
-                        className="px-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
+                        className="p-2 py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white rounded-xl border border-indigo-100 transition-all cursor-pointer flex items-center justify-center shadow-sm font-bold"
+                        title={t.addBtn}
                       >
                         <Plus className="w-4 h-4" />
                       </button>
@@ -420,16 +661,24 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
 
                     <div className="space-y-1.5">
                       {p.evening.workplaces.length === 0 ? (
-                        <div className="text-[10px] text-slate-400 italic font-medium">{t.emptyShift}</div>
+                        <div className="flex flex-col items-center justify-center py-5 px-4 border border-dashed border-slate-200 rounded-xl bg-slate-50/30 text-center select-none text-slate-400/80 max-w-md">
+                          <Sparkles className="w-4 h-4 text-slate-300 mb-1" />
+                          <span className="text-[10px] font-semibold leading-normal">{t.emptyShift}</span>
+                        </div>
                       ) : (
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-2 max-w-md">
                           {p.evening.workplaces.map((work, idx) => (
-                            <div key={idx} className="bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-                              <span>{work}</span>
+                            <div 
+                              key={idx} 
+                              className="group/pill inline-flex items-center gap-1.5 bg-gradient-to-r from-slate-50 to-slate-100 hover:from-white hover:to-white border border-slate-250 hover:border-indigo-400 hover:shadow-sm transition-all duration-200 px-3 py-1.5 rounded-xl select-none"
+                            >
+                              <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                              <span className="text-slate-800 text-xs font-bold">{work}</span>
                               <button
                                 type="button"
                                 onClick={() => handleRemoveWorkplace(p.day, 'evening', idx)}
-                                className="text-slate-400 hover:text-red-500 rounded-sm cursor-pointer"
+                                className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-0.5 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center font-bold text-sm w-4 h-4 ml-0.5"
+                                title={lang === 'ar' ? 'حذف من خط السير' : 'Remove workplace'}
                               >
                                 ×
                               </button>
