@@ -167,53 +167,53 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
   <style>
     @page {
       size: A4 portrait;
-      margin: 8mm;
+      margin: 5mm;
     }
     body {
       font-family: 'Cairo', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      padding: 10px;
+      padding: 0;
       margin: 0;
       color: #1e293b;
       background-color: #ffffff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
+      font-size: 10px;
     }
     .header {
       background: linear-gradient(135deg, #4f46e5, #7c3aed);
       color: #ffffff;
-      padding: 14px 20px;
-      border-radius: 12px;
+      padding: 8px 12px;
+      border-radius: 8px;
       text-align: center;
-      margin-bottom: 12px;
-      box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.1);
+      margin-bottom: 8px;
+      box-shadow: 0 2px 4px rgba(79, 70, 229, 0.1);
     }
     .header h1 {
       margin: 0;
-      font-size: 20px;
+      font-size: 16px;
       font-weight: 800;
-      letter-spacing: -0.025em;
     }
     .metadata-table {
       width: 100%;
       border-collapse: separate;
       border-spacing: 0;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
       background: #ffffff;
-      border-radius: 12px;
+      border-radius: 8px;
       overflow: hidden;
       border: 1px solid #e2e8f0;
     }
     .metadata-table td {
-      padding: 8px 12px;
+      padding: 4px 8px;
       border-bottom: 1px solid #f1f5f9;
-      font-size: 12px;
+      font-size: 11px;
       color: #334155;
       font-weight: 600;
     }
     .metadata-table td.label {
       font-weight: 700;
       background: #f8fafc;
-      width: 20%;
+      width: 15%;
       color: #475569;
       border-left: 1px solid #e2e8f0;
     }
@@ -222,30 +222,30 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
       border-collapse: separate;
       border-spacing: 0;
       background: #ffffff;
-      border-radius: 12px;
+      border-radius: 8px;
       overflow: hidden;
       border: 1px solid #e2e8f0;
     }
     .plan-grid th {
-      padding: 10px 12px;
+      padding: 6px 8px;
       background: #f8fafc;
       color: #1e293b;
       text-align: right;
-      font-size: 12.5px;
+      font-size: 12px;
       font-weight: 800;
       border-bottom: 2px solid #e2e8f0;
     }
     .plan-grid td {
-      padding: 10px 12px;
+      padding: 6px 8px;
       border-bottom: 1px solid #f1f5f9;
       vertical-align: top;
-      font-size: 11.5px;
+      font-size: 10px;
     }
     .plan-grid td.day {
       font-weight: 800;
       background: #f8fafc;
       text-align: center;
-      width: 110px;
+      width: 90px;
       border-left: 1px solid #e2e8f0;
       vertical-align: middle;
     }
@@ -254,40 +254,36 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 4px;
+      gap: 2px;
     }
     .day-name {
       background: #ffffff;
-      padding: 4px 8px;
-      border-radius: 8px;
+      padding: 2px 6px;
+      border-radius: 6px;
       border: 1px solid #cbd5e1;
       color: #0f172a;
       font-weight: 700;
-      font-size: 12px;
-      width: 80px;
+      font-size: 11px;
       display: inline-block;
       text-align: center;
     }
     .day-sub {
-      font-size: 9px;
+      font-size: 8px;
       color: #94a3b8;
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
     }
     .workplace-pill {
       background: linear-gradient(135deg, #f8fafc, #f1f5f9);
       border: 1px solid #cbd5e1;
-      padding: 4px 8px;
-      border-radius: 8px;
+      padding: 2px 6px;
+      border-radius: 6px;
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      margin: 3px;
-      font-size: 11px;
+      gap: 2px;
+      margin: 2px;
+      font-size: 10px;
       font-weight: 700;
       color: #1e293b;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.02);
     }
     .empty-state {
       display: inline-flex;
@@ -296,30 +292,27 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
       color: #94a3b8;
       font-style: italic;
       font-weight: 600;
-      font-size: 11px;
+      font-size: 10px;
       background: #f8fafc;
       border: 1px dashed #cbd5e1;
-      padding: 6px 12px;
-      border-radius: 8px;
+      padding: 4px 8px;
+      border-radius: 6px;
       width: 100%;
       box-sizing: border-box;
     }
     .icon {
-      width: 14px;
-      height: 14px;
-      vertical-align: middle;
-      display: inline-block;
+      display: none;
     }
     .header-icon {
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
       vertical-align: middle;
       display: inline-block;
     }
     .header-content {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
     }
     @media print {
       body { padding: 0; background-color: #ffffff; }
@@ -549,21 +542,15 @@ export default function CyclePlanView({ lang }: CyclePlanViewProps) {
                   </div>
                 </th>
                 <th className="px-6 py-5 text-xs font-bold text-slate-500 border-l border-slate-100/60">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg text-[10px] font-extrabold flex items-center justify-center gap-1 shadow-sm">
-                      <Sun className="w-4 h-4" />
-                      <span>{lang === 'ar' ? 'الفترة الصباحية' : 'Morning'}</span>
-                    </div>
-                    <span className="text-slate-800 font-extrabold text-sm">{t.morningShift}</span>
+                  <div className="flex items-center gap-2">
+                    <Sun className="w-5 h-5 text-amber-500" />
+                    <span className="text-slate-800 font-extrabold text-sm">{lang === 'ar' ? 'الفترة الصباحية' : 'Morning Period'}</span>
                   </div>
                 </th>
                 <th className="px-6 py-5 text-xs font-bold text-slate-500">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-extrabold flex items-center justify-center gap-1 shadow-sm">
-                      <Moon className="w-4 h-4" />
-                      <span>{lang === 'ar' ? 'الفترة المسائية' : 'Evening'}</span>
-                    </div>
-                    <span className="text-slate-800 font-extrabold text-sm">{t.eveningShift}</span>
+                  <div className="flex items-center gap-2">
+                    <Moon className="w-5 h-5 text-indigo-500" />
+                    <span className="text-slate-800 font-extrabold text-sm">{lang === 'ar' ? 'الفترة المسائية' : 'Evening Period'}</span>
                   </div>
                 </th>
               </tr>

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Invoice, InvoiceItem, Doctor, Workplace, VisitLog, WeeklyCycle, VirtualFile, VisitSample } from '../types';
+import { Invoice, InvoiceItem, Doctor, Workplace, VisitLog, WeeklyCycle, VirtualFile, VisitSample, Client } from '../types';
 
 // Constants
 const DB_VERSION = '1.1';
@@ -17,6 +17,7 @@ interface DatabaseState {
   visits: VisitLog[];
   weeklyCycles: WeeklyCycle[];
   files: VirtualFile[];
+  clients: Client[]; // Add clients here
   settings: {
     serverUrl: string;
     apiKey: string;
@@ -69,6 +70,12 @@ export function getInitialState(): DatabaseState {
     try {
       const parsed = JSON.parse(stored);
       if (parsed && parsed.version === DB_VERSION) {
+        if (!parsed.clients) {
+          parsed.clients = [];
+        }
+        if (!parsed.files) {
+          parsed.files = [];
+        }
         return parsed;
       }
     } catch (e) {
@@ -85,6 +92,7 @@ export function getInitialState(): DatabaseState {
     visits: [],
     weeklyCycles: [],
     files: [],
+    clients: [],
     settings: {
       serverUrl: 'https://ais-dev-si6uixl2yb6tgxnqbihxge-5901476095.europe-west1.run.app/api',
       apiKey: 'MY_GEMINI_API_KEY',
@@ -508,16 +516,28 @@ export function evaluateGuardrailAlarms(): GuardrailAlarm[] {
   const alarms: GuardrailAlarm[] = [];
 
   state.visits.forEach((v) => {
-    if (v.latitude && v.longitude && v.workplaceLatitude && v.workplaceLongitude) {
-      const dist = calculateDistance(v.latitude, v.longitude, v.workplaceLatitude, v.workplaceLongitude);
+    // Determine the target locations based on Doctor
+    let targetLat = v.workplaceLatitude;
+    let targetLon = v.workplaceLongitude;
+
+    if (v.clientType === 'Doctor' && v.doctorName) {
+      const doc = state.doctors.find(d => d.name === v.doctorName);
+      if (doc && doc.locationLatitude !== undefined && doc.locationLongitude !== undefined) {
+        targetLat = doc.locationLatitude;
+        targetLon = doc.locationLongitude;
+      }
+    }
+
+    if (v.latitude && v.longitude && targetLat && targetLon) {
+      const dist = calculateDistance(v.latitude, v.longitude, targetLat, targetLon);
       if (dist > 100) {
         alarms.push({
           id: `geofence-${v.id}`,
           type: 'Geofencing Breach',
           titleAr: '🚨 خرق جيو-جغرافي (Geofencing Breach)',
           titleEn: '🚨 Geofencing Breach',
-          descriptionAr: `الزيارة للطبيب ${v.doctorName || 'عميل'} في مكان ${v.workplaceName} تبعد أكثر من ${Math.round(dist)}م عن الإحداثيات المسجلة.`,
-          descriptionEn: `Visit to ${v.doctorName || 'Client'} at ${v.workplaceName} is recorded ${Math.round(dist)}m away from coordinates.`,
+          descriptionAr: `الزيارة للطبيب ${v.doctorName || 'عميل'} في مكان ${v.workplaceName} تبعد أكثر من ${Math.round(dist)}م عن الإحداثيات الحقيقية للطبيب.`,
+          descriptionEn: `Visit to ${v.doctorName || 'Client'} at ${v.workplaceName} is recorded ${Math.round(dist)}m away from doctor's real coordinates.`,
           severity: 'red',
         });
       }
@@ -687,6 +707,7 @@ export function purgeDatabase() {
     visits: [],
     weeklyCycles: [],
     files: [],
+    clients: [],
     settings: {
       serverUrl: 'https://ais-dev-si6uixl2yb6tgxnqbihxge-5901476095.europe-west1.run.app/api',
       apiKey: 'MY_GEMINI_API_KEY',
@@ -1024,6 +1045,29 @@ export function wipeAllMigratedVisitsAndRestoreStock(): { deletedCount: number }
   return { deletedCount };
 }
 
+export function getClients(): Client[] {
+  return getInitialState().clients || [];
+}
+
+export function addClient(clientPayload: Omit<Client, 'id'>): Client {
+  const state = getInitialState();
+  const id = `client-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+  const newClient: Client = { ...clientPayload, id };
+  state.clients.push(newClient);
+  saveState(state);
+  return newClient;
+}
+
+export function updateClient(clientId: string, updates: Partial<Client>): Client | null {
+  const state = getInitialState();
+  const index = state.clients.findIndex(c => c.id === clientId);
+  if (index === -1) return null;
+  const updatedClient = { ...state.clients[index], ...updates };
+  state.clients[index] = updatedClient;
+  saveState(state);
+  return updatedClient;
+}
+
 export function wipeAllDataComplete(): { deletedVisitsCount: number; deletedDoctorsCount: number } {
   const state = getInitialState();
   const deletedVisitsCount = state.visits.length;
@@ -1033,6 +1077,7 @@ export function wipeAllDataComplete(): { deletedVisitsCount: number; deletedDoct
   state.doctors = [];
   state.workplaces = [];
   state.weeklyCycles = [];
+  state.clients = [];
 
   state.invoices.forEach((inv) => {
     inv.items.forEach((item) => {

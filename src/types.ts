@@ -31,6 +31,8 @@ export interface Doctor {
   classRating: 'A' | 'B' | 'C';
   workplace1?: string;
   workplace2?: string;
+  locationLatitude?: number;
+  locationLongitude?: number;
 }
 
 export interface Workplace {
@@ -38,6 +40,17 @@ export interface Workplace {
   name: string;
   latitude: number | null;
   longitude: number | null;
+}
+
+export type ClientCategory = 'مستشفى' | 'مركز طبي' | 'عيادة خاصة' | 'صيدلية' | 'Hospital' | 'Medical Center' | 'Private Clinic' | 'Pharmacy';
+
+export interface Client {
+  id: string;
+  type: ClientCategory;
+  name: string;
+  address: string;
+  locationLatitude?: number;
+  locationLongitude?: number;
 }
 
 export interface VisitSample {
@@ -48,6 +61,18 @@ export interface VisitSample {
     invoiceItemId: string;
     quantityDeducted: number;
   }[];
+}
+
+export type AlarmType = 'GEOFENCE_BREACH' | 'GHOST_CALL' | 'INACTIVITY' | 'LATE_START' | 'CLASS_A_NEGLECT';
+
+export interface GuardrailAlarm {
+  id: string;
+  type: AlarmType;
+  titleEn: string;
+  titleAr: string;
+  descriptionEn: string;
+  descriptionAr: string;
+  timestamp: string;
 }
 
 export interface VisitLog {

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+@import url("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
 @import "tailwindcss";
 
 @theme {
@@ -50,4 +51,11 @@ body {
   font-family: var(--font-sans);
   background-color: #f8fafc; /* Slate 50 */
   color: #0f172a; /* Slate 900 */
+}
+
+@media print {
+  html, body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 }

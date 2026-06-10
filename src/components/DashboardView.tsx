@@ -12,6 +12,28 @@ interface DashboardViewProps {
   lang: 'ar' | 'en';
 }
 
+const AlarmCard: React.FC<{ alarm: GuardrailAlarm; lang: 'ar' | 'en' }> = ({ alarm, lang }) => {
+  return (
+    <div className={`border-l-4 ${alarm.severity === 'red' ? 'border-red-500 hover:border-red-650 bg-red-50/20' : 'border-amber-500 hover:border-amber-650 bg-amber-50/20'} border-slate-100 p-4 rounded-xl shadow-xs flex items-start gap-3.5 transition-all text-right`}>
+      <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${alarm.severity === 'red' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+        <AlertTriangle className="w-4 h-4" />
+      </div>
+      <div className="space-y-1 w-full flex-1 min-w-0">
+        <div className="text-xs font-bold text-slate-950 truncate">
+          {lang === 'ar' ? alarm.titleAr : alarm.titleEn}
+        </div>
+        <div className="text-[11px] leading-relaxed text-slate-550 break-words line-clamp-3">
+          {lang === 'ar' ? alarm.descriptionAr : alarm.descriptionEn}
+        </div>
+        <div className="pt-2 text-[9px] text-slate-400 font-semibold border-t border-slate-100 mt-2 flex items-center justify-between">
+          <span>{lang === 'ar' ? 'الرمز:' : 'Ref:'}</span>
+          <span className="font-mono bg-slate-50 px-1.5 py-0.5 rounded text-slate-600">{alarm.id}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardView({ lang }: DashboardViewProps) {
   const [db, setDb] = useState(getInitialState());
   const [alarms, setAlarms] = useState<GuardrailAlarm[]>([]);
@@ -533,58 +555,83 @@ export default function DashboardView({ lang }: DashboardViewProps) {
           </div>
         </div>
 
-        {/* Section 1: GPS Compliance Violations (alarms) */}
+        {/* Section 1: Geofencing Breach (Geofencing Breach) */}
         <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
           <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-red-500" />
-            {lang === 'ar' ? 'قائمة مخالفات الأمن والالتزام الجغرافي والزمني' : 'Enforcement Alarms & Activity Compliance Logs'}
+            <MapPin className="w-5 h-5 text-red-500" />
+            {lang === 'ar' ? 'قسم خرق جيو-جغرافي (Geofencing Breach)' : 'Geofencing Breach'}
           </h3>
-
-          {alarms.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
-              <CheckCircle className="w-8 h-8 text-emerald-500" />
-              <span className="font-semibold text-slate-700">{lang === 'ar' ? 'سجل الرقابة خالٍ تماماً من المخالفات! العمل متطابق مع خطوط السير.' : 'Excellent work! No GPS coordinates or duration violations detected.'}</span>
-            </div>
+          {alarms.filter(a => a.type === 'Geofencing Breach').length === 0 ? (
+            <div className="text-center text-xs text-slate-400 py-4"><CheckCircle className="w-5 h-5 text-emerald-500 mx-auto mb-1" /> {lang === 'ar' ? 'لا توجد مخالفات' : 'No violations'}</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {alarms.map((alarm) => (
-                <div 
-                  key={alarm.id} 
-                  className="bg-white border-l-4 border-red-500 hover:border-red-650 text-slate-800 p-4 rounded-xl shadow-xs flex items-start gap-3.5 border border-slate-100 transition-all text-right"
-                >
-                  <div className="p-2 bg-red-100 text-red-700 rounded-lg shrink-0 mt-0.5">
-                    <AlertTriangle className="w-4 h-4" />
-                  </div>
-                  <div className="space-y-1 w-full">
-                    <div className="text-xs font-bold text-slate-950">
-                      {lang === 'ar' ? alarm.titleAr : alarm.titleEn}
-                    </div>
-                    <div className="text-xs leading-relaxed text-slate-550">
-                      {lang === 'ar' ? alarm.descriptionAr : alarm.descriptionEn}
-                    </div>
-                    <div className="pt-2 text-[10px] text-slate-400 font-semibold border-t border-slate-100 mt-2 flex items-center justify-between">
-                      <span>{lang === 'ar' ? 'الرمز التعريفي للمخالفة:' : 'Reference:'}</span>
-                      <span className="font-mono bg-slate-50 px-1.5 py-0.5 rounded text-slate-600">{alarm.id}</span>
-                    </div>
-                  </div>
-                </div>
+              {alarms.filter(a => a.type === 'Geofencing Breach').map((alarm) => (
+                <AlarmCard key={alarm.id} alarm={alarm} lang={lang} />
               ))}
             </div>
           )}
         </div>
 
-        {/* Section 2: Neglected Doctors Class A */}
+        {/* Section 2: Ghost/Speed Call */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-red-500" />
+            {lang === 'ar' ? 'قسم زيارة وهمية / سريعة (Ghost/Speed Call)' : 'Ghost/Speed Call'}
+          </h3>
+          {alarms.filter(a => a.type === 'Ghost Call').length === 0 ? (
+            <div className="text-center text-xs text-slate-400 py-4"><CheckCircle className="w-5 h-5 text-emerald-500 mx-auto mb-1" /> {lang === 'ar' ? 'لا توجد مخالفات' : 'No violations'}</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {alarms.filter(a => a.type === 'Ghost Call').map((alarm) => (
+                <AlarmCard key={alarm.id} alarm={alarm} lang={lang} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Section 3: Inactivity Alert */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-amber-500" />
+            {lang === 'ar' ? 'قسم فجوة خمول ميداني (Inactivity Alert)' : 'Inactivity Alert'}
+          </h3>
+          {alarms.filter(a => a.type === 'Inactivity Alert').length === 0 ? (
+            <div className="text-center text-xs text-slate-400 py-4"><CheckCircle className="w-5 h-5 text-emerald-500 mx-auto mb-1" /> {lang === 'ar' ? 'لا توجد مخالفات' : 'No violations'}</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {alarms.filter(a => a.type === 'Inactivity Alert').map((alarm) => (
+                <AlarmCard key={alarm.id} alarm={alarm} lang={lang} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Section 4: Late Start */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-amber-500" />
+            {lang === 'ar' ? 'قسم بدء متأخر للنوبة (Late Start)' : 'Late Start Check-in'}
+          </h3>
+          {alarms.filter(a => a.type === 'Late Start').length === 0 ? (
+            <div className="text-center text-xs text-slate-400 py-4"><CheckCircle className="w-5 h-5 text-emerald-500 mx-auto mb-1" /> {lang === 'ar' ? 'لا توجد مخالفات' : 'No violations'}</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {alarms.filter(a => a.type === 'Late Start').map((alarm) => (
+                <AlarmCard key={alarm.id} alarm={alarm} lang={lang} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Section 5: Class A Neglect */}
         <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
           <h3 className="font-bold text-slate-800 text-sm border-b border-slate-50 pb-2.5 flex items-center gap-2">
             <Users className="w-5 h-5 text-amber-500" />
-            {lang === 'ar' ? 'الأطباء فئة (أ) المهملون منذ أكثر من 14 يوماً' : 'Class A Doctors (>14 Days Without Visit)'}
+            {lang === 'ar' ? 'قسم إهمال طبيب فئة (أ) تجاوز الوقت (Class A Neglect)' : 'Class A Neglect (>14 Days Without Visit)'}
           </h3>
 
           {neglectedClassADocs.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
-              <CheckCircle className="w-8 h-8 text-emerald-500" />
-              <span className="font-semibold text-slate-700">{lang === 'ar' ? 'عمل رائع ومستمر! تم تغطية جميع الأطباء المهمين فئة (أ) دورياً.' : 'Outstanding! All critical doctors have been visited recently.'}</span>
-            </div>
+            <div className="text-center text-xs text-slate-400 py-4"><CheckCircle className="w-5 h-5 text-emerald-500 mx-auto mb-1" /> {lang === 'ar' ? 'لا توجد مخالفات' : 'No violations'}</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
               {neglectedClassADocs.map((doc) => (

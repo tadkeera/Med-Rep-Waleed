@@ -1226,35 +1226,6 @@ export default function VisitsView({ lang }: VisitsViewProps) {
                       )}
                     </div>
                   )}
-
-                  {/* Realtime Geo gap alert for the selected doctor's workplace in Doctors tab */}
-                  {activeTab === 'Doctor' && workplaceName.trim() !== '' && (
-                    (() => {
-                      const wp = db.workplaces.find(
-                        (w) => w.name.trim().toLowerCase() === workplaceName.trim().toLowerCase()
-                      );
-                      const hasMissingCoords = !wp || wp.latitude === null || wp.longitude === null;
-                      if (hasMissingCoords) {
-                        return (
-                          <div className="md:col-span-2 bg-amber-50/90 border border-amber-200 text-amber-900 text-xs p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse text-right">
-                            <div className="flex items-center gap-2 font-bold">
-                              <span className="text-sm">⚠️</span>
-                              <span>{lang === 'ar' ? 'الطبيب بدون موقع مؤرشف حالياً!' : 'Doctor has no saved location!'}</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleFixWorkplaceLocationInput(workplaceName)}
-                              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer self-end sm:self-auto"
-                            >
-                              <span>📍</span>
-                              <span>{lang === 'ar' ? 'تثبيت الموقع الحالي وحل الفجوة' : 'Pin Current Location & Resolve'}</span>
-                            </button>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })()
-                  )}
                 </div>
 
                 {/* Auto GPS status indicators */}

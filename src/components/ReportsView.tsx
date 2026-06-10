@@ -4,9 +4,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { getInitialState, saveVirtualFile, updateDoctor } from '../utils/db';
-import { Doctor } from '../types';
-import { FileText, Search, TrendingUp, Sparkles, Download, Printer, Calendar, Loader } from 'lucide-react';
+import { getInitialState, saveVirtualFile, updateDoctor, addClient, updateClient, getClients } from '../utils/db';
+import { Doctor, Client, ClientCategory } from '../types';
+import { FileText, Search, TrendingUp, Sparkles, Download, Printer, Calendar, Loader, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 
@@ -16,7 +16,8 @@ interface ReportsViewProps {
 
 export default function ReportsView({ lang }: ReportsViewProps) {
   const [db, setDb] = useState(getInitialState());
-  const [reportType, setReportType] = useState<'sample' | 'doctor' | 'visitslog' | 'doctorsList'>('sample');
+  const [clientsData, setClientsData] = useState<Client[]>([]);
+  const [reportType, setReportType] = useState<'sample' | 'doctor' | 'visitslog' | 'doctorsList' | 'clientsList'>('sample');
 
   // Input Filters
   const [dateFrom, setDateFrom] = useState('2026-05-01');
@@ -27,7 +28,7 @@ export default function ReportsView({ lang }: ReportsViewProps) {
   const [doctorInputFocused, setDoctorInputFocused] = useState(false);
   const [doctorListClassFilter, setDoctorListClassFilter] = useState('');
   const [doctorListSpecFilter, setDoctorListSpecFilter] = useState('');
-  const [doctorListWorkplaceFilter, setDoctorListWorkplaceFilter] = useState('');
+  const [doctorListNameFilter, setDoctorListNameFilter] = useState('');
 
   // AI Analysis states
   const [aiAnalysisText, setAiAnalysisText] = useState<string | null>(null);
@@ -37,14 +38,20 @@ export default function ReportsView({ lang }: ReportsViewProps) {
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
   const [editDocFields, setEditDocFields] = useState<Partial<Doctor>>({});
 
+  // Client modal
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [editClientFields, setEditClientFields] = useState<Partial<Client>>({});
+  const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+
   useEffect(() => {
     setDb(getInitialState());
+    setClientsData(getClients());
     
     // Auto-populate default filters which are guaranteed to have data
     const activeSamples = getUniqueSamples();
     if (activeSamples.length > 0) setSelectedSample(activeSamples[0]);
 
-    const activeDocs = db.doctors;
+    const activeDocs = getInitialState().doctors;
     if (activeDocs.length > 0) setSelectedDoctor(activeDocs[0].name);
   }, []);
 
@@ -60,6 +67,12 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       sampleType: 'تقرير تفريغ الصنف الطبي (Sample)',
       doctorType: 'تقرير تفصيلي شامل للطبيب (Doctor)',
       doctorsListType: 'قائمة الأطباء',
+      clientsListType: 'قائمة العملاء (المستشفيات، العيادات، الصيدليات)',
+      addNewClient: 'إضافة عميل جديد',
+      clientTypeLabel: 'نوع العميل',
+      clientName: 'اسم العميل',
+      clientAddress: 'عنوان العميل',
+      gpsCoordinates: 'إحداثيات الـ GPS الجغرافية',
       dateFromLabel: 'من تاريخ الزيارات',
       dateToLabel: 'إلى تاريخ',
       sampleLabel: 'اختر الصنف المراد تفريغه',
@@ -92,6 +105,12 @@ export default function ReportsView({ lang }: ReportsViewProps) {
       sampleType: 'Sample Release Distribution Report',
       doctorType: 'Detailed Analytics Physician Report',
       doctorsListType: 'Doctors List Report',
+      clientsListType: 'Clients List (Hospitals, Clinics, Pharmacies)',
+      addNewClient: 'Add New Client',
+      clientTypeLabel: 'Client Type',
+      clientName: 'Client Name',
+      clientAddress: 'Client Address',
+      gpsCoordinates: 'Geographical GPS Coordinates',
       dateFromLabel: 'Visits From Date',
       dateToLabel: 'To Date',
       sampleLabel: 'Choose Sample Medicine',
@@ -384,9 +403,9 @@ export default function ReportsView({ lang }: ReportsViewProps) {
         .filter((d) => !doctorListClassFilter || d.classRating === doctorListClassFilter)
         .filter((d) => !doctorListSpecFilter || d.speciality?.toLowerCase().includes(doctorListSpecFilter.toLowerCase()))
         .filter((d) => {
-          if (!doctorListWorkplaceFilter) return true;
-          const q = doctorListWorkplaceFilter.toLowerCase();
-          return (d.workplace1?.toLowerCase().includes(q) || d.workplace2?.toLowerCase().includes(q));
+          if (!doctorListNameFilter) return true;
+          const q = doctorListNameFilter.toLowerCase();
+          return (d.name.toLowerCase().includes(q));
         });
       exportHtml = `
 <!DOCTYPE html>
@@ -588,9 +607,9 @@ export default function ReportsView({ lang }: ReportsViewProps) {
           .filter((d) => !doctorListClassFilter || d.classRating === doctorListClassFilter)
           .filter((d) => !doctorListSpecFilter || d.speciality?.toLowerCase().includes(doctorListSpecFilter.toLowerCase()))
           .filter((d) => {
-            if (!doctorListWorkplaceFilter) return true;
-            const q = doctorListWorkplaceFilter.toLowerCase();
-            return (d.workplace1?.toLowerCase().includes(q) || d.workplace2?.toLowerCase().includes(q));
+            if (!doctorListNameFilter) return true;
+            const q = doctorListNameFilter.toLowerCase();
+            return (d.name.toLowerCase().includes(q));
           })
           .forEach((d) => {
             if (rowY > 270) {
@@ -714,6 +733,18 @@ export default function ReportsView({ lang }: ReportsViewProps) {
         >
           {t.doctorsListType}
         </button>
+        <button
+          type="button"
+          className={`flex-1 text-center py-3 text-[10px] md:text-xs font-bold rounded-lg transition-all cursor-pointer ${
+            reportType === 'clientsList' as any ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+          }`}
+          onClick={() => {
+            setReportType('clientsList' as any);
+            setAiAnalysisText(null);
+          }}
+        >
+          {t.clientsListType}
+        </button>
       </div>
 
       {/* Filter panel */}
@@ -830,14 +861,14 @@ export default function ReportsView({ lang }: ReportsViewProps) {
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 block mb-1">
-                  {lang === 'ar' ? 'مكان العمل' : 'Workplace'}
+                  {lang === 'ar' ? 'اسم الطبيب' : 'Doctor Name'}
                 </label>
                 <input
                   type="text"
-                  placeholder={lang === 'ar' ? 'ابحث عن مكان العمل...' : 'Search workplace...'}
+                  placeholder={lang === 'ar' ? 'ابحث عن اسم الطبيب...' : 'Search doctor name...'}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none font-medium text-slate-800 focus:border-indigo-400 focus:bg-white transition-colors"
-                  value={doctorListWorkplaceFilter}
-                  onChange={(e) => setDoctorListWorkplaceFilter(e.target.value)}
+                  value={doctorListNameFilter}
+                  onChange={(e) => setDoctorListNameFilter(e.target.value)}
                 />
               </div>
             </>
@@ -1176,9 +1207,9 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                     .filter((d) => !doctorListClassFilter || d.classRating === doctorListClassFilter)
                     .filter((d) => !doctorListSpecFilter || d.speciality?.toLowerCase().includes(doctorListSpecFilter.toLowerCase()))
                     .filter((d) => {
-                      if (!doctorListWorkplaceFilter) return true;
-                      const q = doctorListWorkplaceFilter.toLowerCase();
-                      return (d.workplace1?.toLowerCase().includes(q) || d.workplace2?.toLowerCase().includes(q));
+                      if (!doctorListNameFilter) return true;
+                      const q = doctorListNameFilter.toLowerCase();
+                      return (d.name.toLowerCase().includes(q));
                     })
                     .map((d, index) => (
                       <tr key={d.id} className="hover:bg-slate-50 transition-colors">
@@ -1205,7 +1236,9 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                                 speciality: d.speciality,
                                 classRating: d.classRating,
                                 workplace1: d.workplace1,
-                                workplace2: d.workplace2
+                                workplace2: d.workplace2,
+                                locationLatitude: d.locationLatitude,
+                                locationLongitude: d.locationLongitude
                               });
                             }}
                             className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded text-[10px] font-bold"
@@ -1226,10 +1259,88 @@ export default function ReportsView({ lang }: ReportsViewProps) {
               </table>
             </div>
           </motion.div>
+        ) : reportType === 'clientsList' as any ? (
+          <motion.div 
+            key="clientslist-report"
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm p-6 space-y-4"
+          >
+            <div className="flex justify-between items-center bg-slate-50 border border-slate-100 p-4 rounded-xl">
+              <div>
+                <h4 className="text-sm font-bold text-slate-800">
+                  {t.clientsListType}
+                </h4>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingClient(null);
+                  setEditClientFields({});
+                  setIsClientModalOpen(true);
+                }}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                {t.addNewClient}
+              </button>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50">
+              <table className="w-full text-right border-collapse text-[11px] leading-tight">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold">
+                    <th className="p-3">#</th>
+                    <th className="p-3 text-right">{t.clientName}</th>
+                    <th className="p-3 text-center">{t.clientTypeLabel}</th>
+                    <th className="p-3 text-right">{t.clientAddress}</th>
+                    <th className="p-3 text-center">{lang === 'ar' ? 'الإجراءات' : 'Actions'}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {clientsData.map((client, index) => (
+                    <tr key={client.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-3 w-8 text-slate-400 font-mono text-center">{index + 1}</td>
+                      <td className="p-3 font-bold text-slate-900 text-xs">{client.name}</td>
+                      <td className="p-3 text-center text-slate-600 font-medium">
+                        <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded text-xs">{client.type}</span>
+                      </td>
+                      <td className="p-3 text-slate-700">{client.address || '------'}</td>
+                      <td className="p-3 text-center">
+                        <button
+                          onClick={() => {
+                            setEditingClient(client);
+                            setEditClientFields({
+                              name: client.name,
+                              category: client.type,
+                              address: client.address,
+                              latitude: client.locationLatitude,
+                              longitude: client.locationLongitude
+                            });
+                            setIsClientModalOpen(true);
+                          }}
+                          className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded text-[10px] font-bold"
+                        >
+                          {lang === 'ar' ? 'تعديل' : 'Edit'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {clientsData.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-slate-400">
+                        {lang === 'ar' ? 'لا توجد بيانات للعملاء' : 'No clients found'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
         ) : null}
       </AnimatePresence>
 
-      {/* Edit Doctor Modal */}
+      {/* Edit Doctor Modal ... */}
       <AnimatePresence>
         {editingDoctor && (
           <motion.div
@@ -1279,6 +1390,59 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                     <option value="C">Class C</option>
                   </select>
                 </div>
+                <div className="pt-2 border-t border-slate-100">
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold text-slate-600">
+                      {lang === 'ar' ? 'بيانات الـ GPS للموقع المستهدف' : 'Target GPS Location'}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (navigator.geolocation) {
+                          navigator.geolocation.getCurrentPosition(
+                            (pos) => {
+                              setEditDocFields({
+                                ...editDocFields,
+                                locationLatitude: pos.coords.latitude,
+                                locationLongitude: pos.coords.longitude
+                              });
+                            },
+                            (err) => {
+                              alert(lang === 'ar' ? 'تعذر جلب الموقع. يرجى تفعيل الـ GPS.' : 'Cannot detech location. Enable GPS.');
+                            },
+                            { enableHighAccuracy: true }
+                          );
+                        }
+                      }}
+                      className="text-[10px] font-bold px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      {lang === 'ar' ? 'تحديث الموقع الجغرافي الآن' : 'Update Physical Geo-Location'}
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="w-1/2">
+                      <label className="text-[10px] text-slate-500 block mb-0.5">Latitude (خط العرض)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={editDocFields.locationLatitude || ''}
+                        readOnly
+                        className="w-full border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                      />
+                    </div>
+                    <div className="w-1/2">
+                      <label className="text-[10px] text-slate-500 block mb-0.5">Longitude (خط الطول)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={editDocFields.locationLongitude || ''}
+                        readOnly
+                        className="w-full border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
@@ -1302,6 +1466,157 @@ export default function ReportsView({ lang }: ReportsViewProps) {
                   className="px-4 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700 transition-colors"
                 >
                   {lang === 'ar' ? 'حفظ التعديلات' : 'Save Changes'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit/Add Client Modal */}
+      <AnimatePresence>
+        {isClientModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-white p-6 rounded-2xl max-w-sm w-full shadow-xl space-y-4"
+            >
+              <h3 className="font-bold text-slate-800 text-base border-b border-slate-100 pb-2">
+                {editingClient ? (lang === 'ar' ? 'تعديل بيانات العميل' : 'Edit Client Details') : t.addNewClient}
+              </h3>
+              
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">{t.clientTypeLabel}</label>
+                  <select
+                    value={editClientFields.category || 'مستشفى'}
+                    onChange={(e) => setEditClientFields({...editClientFields, category: e.target.value as ClientCategory})}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="مستشفى">مستشفى</option>
+                    <option value="مركز طبي">مركز طبي</option>
+                    <option value="عيادة خاصة">عيادة خاصة</option>
+                    <option value="صيدلية">صيدلية</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">{t.clientName}</label>
+                  <input
+                    type="text"
+                    value={editClientFields.name || ''}
+                    onChange={(e) => setEditClientFields({...editClientFields, name: e.target.value})}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">{t.clientAddress}</label>
+                  <input
+                    type="text"
+                    value={editClientFields.address || ''}
+                    onChange={(e) => setEditClientFields({...editClientFields, address: e.target.value})}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="pt-2 border-t border-slate-100">
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold text-slate-600">
+                      {t.gpsCoordinates}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (navigator.geolocation) {
+                          navigator.geolocation.getCurrentPosition(
+                            (pos) => {
+                              setEditClientFields({
+                                ...editClientFields,
+                                latitude: pos.coords.latitude,
+                                longitude: pos.coords.longitude
+                              });
+                            },
+                            (err) => {
+                              alert(lang === 'ar' ? 'تعذر جلب الموقع. يرجى تفعيل الـ GPS.' : 'Cannot detech location. Enable GPS.');
+                            },
+                            { enableHighAccuracy: true }
+                          );
+                        }
+                      }}
+                      className="text-[10px] font-bold px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      {lang === 'ar' ? 'تحديث الموقع الجغرافي' : 'Update Geo-Location'}
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="w-1/2">
+                      <label className="text-[10px] text-slate-500 block mb-0.5">Latitude (خط العرض)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={editClientFields.latitude || ''}
+                        readOnly
+                        className="w-full border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                      />
+                    </div>
+                    <div className="w-1/2">
+                      <label className="text-[10px] text-slate-500 block mb-0.5">Longitude (خط الطول)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={editClientFields.longitude || ''}
+                        readOnly
+                        className="w-full border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsClientModalOpen(false)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-50 transition-colors"
+                >
+                  {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (editClientFields.name?.trim()) {
+                      if (editingClient) {
+                        updateClient(editingClient.id, {
+                          name: editClientFields.name,
+                          type: editClientFields.category || 'مستشفى',
+                          address: editClientFields.address || '',
+                          locationLatitude: editClientFields.latitude || undefined,
+                          locationLongitude: editClientFields.longitude || undefined
+                        });
+                      } else {
+                        addClient({
+                          name: editClientFields.name,
+                          type: editClientFields.category || 'مستشفى',
+                          address: editClientFields.address || '',
+                          locationLatitude: editClientFields.latitude || undefined,
+                          locationLongitude: editClientFields.longitude || undefined
+                        });
+                      }
+                      setDb(getInitialState());
+                      setClientsData(getClients());
+                      setIsClientModalOpen(false);
+                      setEditingClient(null);
+                    }
+                  }}
+                  className="px-4 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700 transition-colors"
+                >
+                  {lang === 'ar' ? 'حفظ' : 'Save'}
                 </button>
               </div>
             </motion.div>
